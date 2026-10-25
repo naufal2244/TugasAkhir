@@ -1,0 +1,55 @@
+## Rekomendasi utama
+
+Untuk Tugas Akhir Anda, metode yang paling tepat adalah **Refactoring Process** dari Fowler, diterapkan secara **iteratif** pada sistem Koladi yang sudah berjalan. Metode ini secara langsung sesuai dengan konteks *brownfield*: mengubah struktur internal dan kinerja sistem tanpa mengubah perilaku fungsional yang teramati. [martinfowler](https://martinfowler.com/books/refactoring.html)
+
+Fowler mendefinisikan refactoring sebagai perubahan terhadap struktur internal perangkat lunak untuk membuatnya lebih mudah dipahami dan dimodifikasi, tanpa mengubah perilaku eksternalnya. Prinsip “perilaku tidak berubah” ini sangat penting karena 22 metrik DSS harus menghasilkan nilai yang identik sebelum dan sesudah optimasi. [martinfowler](https://martinfowler.com/books/refactoring.html)
+
+## Alternatif metode yang layak
+
+| Metode | Keunggulan untuk Koladi | Keterbatasan untuk Koladi |
+|---|---|---|
+| **Refactoring Process — Fowler (2018)** | Paling selaras dengan refactoring ORM, cache-aside, penghapusan N+1, dan refactor query-in-loop; menekankan pengujian sebagai pengaman agar perilaku tidak berubah.  [martinfowler](https://martinfowler.com/books/refactoring.html) | Secara murni lebih menekankan perbaikan struktur kode daripada pengukuran kinerja; karena itu perlu ditambah tahap *profiling* dan *benchmarking*. |
+| **Iterative Enhancement Model — Basili & Turner (1975)** | Cocok untuk evolusi bertahap sistem yang sudah ada: setiap iterasi menghasilkan versi yang dapat diuji dan dianalisis secara kuantitatif.  [dl.acm](https://dl.acm.org/doi/10.1109/TSE.1975.6312870) | Model aslinya berorientasi pada pengembangan sistem dari subset awal menuju implementasi penuh, sehingga kurang spesifik untuk kasus optimasi performa.  [dl.acm](https://dl.acm.org/doi/10.1109/TSE.1975.6312870) |
+| **Survey of Software Refactoring — Mens & Tourwé (2004)** | Memberi landasan akademik yang kuat mengenai aktivitas refactoring, dampaknya terhadap proses perangkat lunak, dan kebutuhan dukungan pengujian.  [orbi.umons.ac](https://orbi.umons.ac.be/bitstream/20.500.12907/20050/1/TSE2004-surveyrefactoring.pdf) | Merupakan survei literatur, bukan proses langkah-demi-langkah yang siap langsung dipakai sebagai metodologi pengembangan.  [orbi.umons.ac](https://orbi.umons.ac.be/bitstream/20.500.12907/20050/1/TSE2004-surveyrefactoring.pdf) |
+| **Adaptasi Agile/Iterative + Performance Engineering** | Fleksibel untuk siklus pendek: ukur baseline, ubah satu bagian, uji, ukur ulang, lalu deploy. Laravel Telescope mendukung observasi query, waktu eksekusi, cache, dan exception.  [laravel](https://laravel.com/framework/docs/12.x/telescope) | Jika hanya memakai Agile secara umum, justifikasi akademiknya kurang spesifik terhadap refactoring dan menjaga kesetaraan hasil metrik. |
+
+**Rekomendasi penulisan:** gunakan **Refactoring Process Fowler** sebagai metodologi utama, lalu posisikan **Iterative Enhancement** sebagai pendekatan pelaksanaan iterasi. Kombinasi ini tetap konsisten dengan konteks *software evolution* dan memperkuat aspek pengukuran kinerja sebelum–sesudah. [martinfowler](https://martinfowler.com/books/refactoring.html)
+
+## Subbab 2.3 — Metode Pengembangan Produk
+
+Pengembangan produk pada Tugas Akhir ini menggunakan **metode refactoring berbasis iterasi** pada sistem Koladi yang telah berjalan. Pendekatan ini dipilih karena tujuan penelitian bukan membangun aplikasi baru, melainkan meningkatkan kinerja modul *Decision Support System* (DSS) melalui Redis Cache-Aside, invalidasi berbasis event, dan optimasi Eloquent ORM tanpa mengubah hasil fungsional sistem. [martinfowler](https://martinfowler.com/books/refactoring.html)
+
+Refactoring dipahami sebagai perubahan struktur internal perangkat lunak untuk meningkatkan kualitas desain dan kemudahan pemeliharaan tanpa mengubah perilaku eksternal.  Prinsip tersebut selaras dengan kebutuhan proyek: seluruh 22 metrik DSS harus menghasilkan nilai yang sama sebelum dan sesudah intervensi teknis. Mens dan Tourwé menegaskan bahwa refactoring merupakan aktivitas perubahan perangkat lunak yang mempertahankan perilaku eksternal dan memerlukan dukungan verifikasi untuk memastikan tidak terjadi regresi. [martinfowler](https://martinfowler.com/books/refactoring.html)
+
+Pelaksanaan dilakukan secara iteratif mengikuti prinsip *iterative enhancement*: sistem yang ada dianalisis, dioptimasi per bagian, diuji, dan dievaluasi secara kuantitatif pada setiap iterasi.  Dengan demikian, perubahan dapat dilakukan secara terkendali, misalnya memulai dari baseline performa, kemudian mengoptimasi relasi `checklists`, mengganti pola query dalam loop pada `getWorkloadDistribution()`, dan terakhir menerapkan Redis Cache-Aside beserta observer invalidasi. [dl.acm](https://dl.acm.org/doi/10.1109/TSE.1975.6312870)
+
+### Tahapan dan rencana aktivitas
+
+| Tahap | Deskripsi teoretis | Aktivitas konkret pada Koladi | Keluaran/Deliverable |
+|---|---|---|---|
+| **1. Analisis sistem dan identifikasi masalah** | Memahami kondisi sistem eksisting, batasan fungsional, arsitektur, dan masalah kinerja sebelum melakukan perubahan. | Meninjau modul DSS, alur perhitungan 22 metrik, struktur model `Task`, `TaskAssignment`, dan relasi `checklists`; mengidentifikasi endpoint/fitur yang menjadi objek pengujian. | Dokumen analisis sistem, daftar endpoint DSS, daftar 22 metrik, serta batasan perilaku yang harus dipertahankan. |
+| **2. Pembentukan baseline performa** | Mengukur kondisi awal sistem sebagai pembanding objektif sebelum refactoring. | Mengaktifkan Laravel Telescope untuk merekam query SQL, binding, durasi eksekusi, operasi cache, dan exception.  [laravel](https://laravel.com/framework/docs/12.x/telescope) Melakukan pengukuran *response time*, jumlah query, dan penggunaan memori pada skenario beban yang sama. | Baseline performa: rata-rata/persentil response time, jumlah query per request, konsumsi memori, serta identifikasi N+1 dan query-in-loop. |
+| **3. Perencanaan refactoring dan desain solusi** | Menentukan urutan perubahan, strategi cache, dan mekanisme pengujian agar perubahan bersifat terkendali. | Merancang cache-aside Redis untuk data DSS; menentukan kunci cache, TTL, dan event invalidasi melalui Eloquent Observer pada `Task` serta pivot `TaskAssignment`; merancang eager loading selektif dan batch retrieval untuk `getWorkloadDistribution()`. | Desain teknis cache-aside, diagram alur invalidasi, rencana refactor ORM, dan rencana pengujian regresi/ekuivalensi. |
+| **4. Pembuatan pengujian pengaman** | Sebelum refactoring, perilaku sistem yang ada perlu dikunci melalui pengujian agar perubahan dapat diverifikasi. | Membuat *characterization tests* dan pengujian regresi untuk output 22 metrik DSS; menyimpan hasil baseline metrik sebagai *expected values*; menyiapkan pengujian untuk membandingkan hasil sebelum dan sesudah refactor. | Suite pengujian otomatis, dataset uji, serta *golden output* atau *expected result* untuk 22 metrik DSS. |
+| **5. Implementasi refactoring** | Melakukan perubahan struktur internal secara bertahap tanpa mengubah perilaku fungsional. | Menerapkan eager loading selektif pada relasi `checklists`; menghapus N+1; mengubah query dalam loop menjadi batch retrieval dengan agregasi in-memory; mengimplementasikan Redis Cache-Aside dan Observer invalidasi. | Kode hasil refactor pada branch pengembangan, termasuk cache service/repository, observer, dan query optimization. |
+| **6. Verifikasi kesetaraan fungsional** | Memastikan refactoring tidak mengubah hasil yang diamati pengguna. | Menjalankan seluruh characterization/regression tests; membandingkan keluaran 22 metrik sebelum dan sesudah refactor; memeriksa invalidasi cache ketika task atau assignment berubah. | Laporan ekuivalensi hasil: seluruh 22 metrik identik dengan baseline; bukti invalidasi cache bekerja sesuai desain. |
+| **7. Pengukuran ulang dan evaluasi performa** | Membandingkan kondisi setelah optimasi dengan baseline menggunakan metrik yang sama. | Mengulangi skenario pengukuran dengan konfigurasi, data, dan beban yang setara; mencatat response time, jumlah query, dan memori; menganalisis peningkatan atau anomali. | Tabel perbandingan baseline vs. optimized, grafik/diagram hasil, dan analisis peningkatan performa. |
+| **8. Integrasi, deployment, dan dokumentasi** | Menyatukan perubahan yang telah terverifikasi ke kode utama dan mendokumentasikan keputusan teknis. | Melakukan code review, merge ke branch utama, deployment ke lingkungan pengujian/produksi sesuai kebijakan Koladi, serta dokumentasi konfigurasi Redis dan strategi invalidasi. | Versi final aplikasi, dokumentasi teknis, panduan konfigurasi Redis, dan laporan akhir Tugas Akhir. |
+
+## Catatan metodologis
+
+Jika dosen pembimbing menghendaki istilah SDLC yang lebih umum, Anda dapat menyebutnya sebagai **adaptasi siklus evolusi perangkat lunak dengan pendekatan refactoring iteratif**. Namun, jangan menuliskannya sebagai “Waterfall” karena baseline, implementasi, pengujian, dan pengukuran ulang akan berulang untuk setiap intervensi teknis.
+
+Untuk klaim teknis Laravel Telescope, sumber resmi Laravel menyatakan bahwa Telescope merekam request, exception, log, query database, operasi cache, dan informasi terkait lainnya; *query watcher*-nya mencatat SQL, binding, dan waktu eksekusi query.  Ini dapat dikutip sebagai dasar pemilihan alat profiling pada tahap baseline. [laravel](https://laravel.com/framework/docs/12.x/telescope)
+
+## Daftar pustaka — APA 7
+
+Basili, V. R., & Turner, A. J. (1975). Iterative enhancement: A practical technique for software development. *IEEE Transactions on Software Engineering, SE-1*(4), 390–396. [https://doi.org/10.1109/TSE.1975.6312870](https://doi.org/10.1109/TSE.1975.6312870) [dl.acm](https://dl.acm.org/doi/10.1109/TSE.1975.6312870)
+
+Fowler, M. (2018). *Refactoring: Improving the design of existing code* (2nd ed.). Addison-Wesley Professional. [pearson](https://www.pearson.com/en-us/subject-catalog/p/Fowler-Refactoring-Improving-the-Design-of-Existing-Code-2-e-2nd-Edition/P200000000254?view=educator)
+
+Laravel. (2026). *Laravel Telescope*. [https://laravel.com/docs/12.x/telescope](https://laravel.com/docs/12.x/telescope) [laravel](https://laravel.com/framework/docs/12.x/telescope)
+
+Mens, T., & Tourwé, T. (2004). A survey of software refactoring. *IEEE Transactions on Software Engineering, 30*(2), 126–139. [https://doi.org/10.1109/TSE.2004.1265817](https://doi.org/10.1109/TSE.2004.1265817) [orbi.umons.ac](https://orbi.umons.ac.be/bitstream/20.500.12907/20050/1/TSE2004-surveyrefactoring.pdf)
+
+**Catatan kehati-hatian:** Saya belum menemukan sumber primer yang cukup kuat dan terverifikasi dalam pencarian ini untuk “Performance Engineering Lifecycle” sebagai satu metodologi baku dengan penulis/tahun tertentu. Jika Anda ingin mengutipnya, sebaiknya verifikasi terlebih dahulu sumber primer—misalnya karya Smith dan Williams tentang *Software Performance Engineering*—sebelum memasukkannya ke daftar pustaka.

@@ -247,3 +247,134 @@ Menguji signifikansi perbedaan antara konfigurasi baseline dan optimized menggun
 SQL Query Count: Karena jumlah kueri bersifat pasti dan selalu sama di setiap repetisi (deterministik), pembuktian berfokus pada penurunan jumlah kueri secara langsung, dengan signifikansi statistik dilaporkan sebagai P < 0.001 (Japke et al., 2025; Uddin & Lu, 2024). 
 
 Cache Hit Ratio: Dianalisis bersamaan dengan jumlah kueri untuk memastikan apakah kondisi Cache Hit benar-benar membebaskan basis data dari pemanggilan kueri secara penuh (full bypass) (An & Cao, 2022). 
+
+BAB III METODOLOGI 
+
+3.1. Alat dan Bahan 
+
+Alat dan bahan digunakan untuk mendukung seluruh rangkaian penelitian, mulai dari proses diagnosis awal (profiling), restrukturisasi kode program modul DSS, penyusunan instrumen pengukuran performa, eksekusi pengujian sekuensial terkontrol (controlled benchmarking), hingga verifikasi data dan analisis statistik. 
+
+3.1.1 Alat 
+
+Alat yang digunakan untuk mendukung penelitian ini mencakup perangkat keras, perangkat lunak, serta perkakas instrumentasi pengukuran teknis sebagai berikut: 
+
+Tabel 2. Alat Penelitian 
+
+
+
+Spesifikasi perangkat keras dan perangkat lunak yang digunakan dicatat sebagai bagian dari dokumentasi lingkungan pengujian agar kondisi eksperimen dapat dijelaskan dan direplikasi secara konsisten. Pengujian performa dijalankan pada unit komputer dengan prosesor Apple M2 Pro, kapasitas memori utama (RAM) 16 GB, media penyimpanan Solid State Drive (SSD) 1 TB, dan sistem operasi macOS. 
+
+| Alat | Fungsi |
+| :--- | :--- |
+| **Laptop / Komputer** | Menjalankan lingkungan pengujian terisolasi, mengorkestrasi kontainer Docker, mengeksekusi skrip benchmark sekuensial, serta mengolah data hasil eksperimen. |
+| **Visual Studio Code** | Lingkungan pengembangan terintegrasi (IDE) untuk menelusuri kode sumber Koladi, merefaktorisasi modul DSS, dan menyusun skrip pengujian. |
+| **Docker dan Docker Compose** | Menyediakan dan mengisolasi lingkungan pengujian multi-kontainer pada jaringan lokal (`koladi_net`), mencakup layanan Nginx, PHP-FPM, PostgreSQL, dan Redis. |
+| **Laravel 12.x (PHP ^8.2)** | Kerangka kerja (*framework*) backend aplikasi Koladi yang menjadi subjek refaktorisasi modul DSS dan penyedia runtime eksekusi pengujian. |
+| **PostgreSQL 15** | Sistem Manajemen Basis Data Relasional (RDBMS) utama untuk menyimpan entitas data relasional Koladi dan melayani kueri persisten. |
+| **Redis 7.x (via phpredis)** | *In-memory key-value data store* yang berfungsi sebagai media penyimpanan *cache* berbasis RAM pada konfigurasi teroptimasi (Redis Cache-Aside). |
+| **Node.js Benchmark Runner (`benchmark-dss.js`)** | Perkakas pengujian klien untuk mengorkestrasi eksekusi permintaan HTTP sekuensial terisolasi, mengatur 3 *warm-up requests*, menjalankan 10 repetisi pengujian valid, serta mencatat nilai *response time* menggunakan `process.hrtime()`. |
+| **Middleware Instrumentasi Laravel (`BenchmarkInstrumentation.php`)** | Komponen *server-side* untuk mencatat metrik internal performa pada setiap *request* uji, meliputi jumlah kueri SQL (`DB::listen`), alokasi memori puncak (`memory_get_peak_usage(true)`), dan rasio *cache* Redis. |
+| **Skrip CSV Validator (`validate-csv.js`)** | Skrip otomatis untuk memverifikasi integritas struktur berkas CSV, memastikan kelengkapan kombinasi perlakuan, dan memvalidasi keutuhan 240 baris data observasi valid sebelum dianalisis. |
+| **Laravel Telescope** | Perkakas diagnostik untuk melakukan *profiling* awal guna mendeteksi antipola kueri (*N+1 query*, *query-in-loop*, dan *column over-fetching*) sebelum pengujian komparatif dijalankan. |
+| **Git** | Sistem kontrol versi (*version control system*) untuk melacak riwayat perubahan kode sumber serta mengelola cabang (*branch*) *baseline* dan *optimized*. |
+| **Web Browser** | Memeriksa antarmuka pengguna Koladi untuk keperluan verifikasi visual papan tugas (Kanban) dan modal statistik kinerja. |
+
+ 
+
+3.1.2 Bahan 
+
+Bahan-bahan yang digunakan dalam penelitian ini berupa berkas kode sumber, data sintetis pengujian, skema basis data, rekaman log, serta literatur pendukung sebagai berikut: 
+
+Tabel 3. Bahan Penelitian 
+
+| Bahan | Fungsi |
+| :--- | :--- |
+| **Kode sumber (*source code*) aplikasi Koladi** | Objek rekayasa refaktorisasi, khususnya berkas logika kalkulasi DSS (`DSSService`, `SnapshotManager`, `MetricsCalculator`, `TrendAnalyzer`, `RecommendationEngine`, serta *controller* terkait). |
+| **Rute dan *endpoint* DSS Koladi** | Titik akses jalur eksekusi komputasi analitis yang diuji, mencakup rute `GET /statistik/suggestions` dan `GET /statistik/modal-data`. |
+| **Skema basis data PostgreSQL Koladi** | Struktur tabel relasional, atribut kolom, relasi antar-entitas, dan indeks awal pada tabel `tasks`, `checklists`, `users`, `workspace_members`, `workspaces`, serta `workspace_performance_snapshots`. |
+| **Dataset sintetis terstruktur (*Seeded Dataset*)** | Data pengujian terkontrol yang dibangkitkan via Laravel Seeder dan Factory (`ResearchDataSeeder.php`) dalam 3 skala volume: Small (50 tugas/5 anggota), Medium (200 tugas/15 anggota), dan Large (500 tugas/30 anggota). |
+| **Log diagnostik Laravel Telescope** | Data penelusuran awal yang menjadi bukti empiris keberadaan inefisiensi kueri relasional dan pola *partial cache hit* pada konfigurasi awal (*baseline*). |
+| **Data mentah hasil pengukuran (*Dataset CSV*)** | Berkas rekaman 240 observasi valid (120 data *baseline* dan 120 data *optimized*) yang memuat metrik *response time*, *SQL query count*, *memory utilization*, dan *cache hit ratio*. |
+| **Rancangan kode refaktorisasi optimasi** | Implementasi teknis pola Redis Cache-Aside, *selective eager loading* (`with(['assignedUsers:id', 'checklists:id,task_id,is_done'])`), dan *batch in-memory aggregation*. |
+| **Skrip pengujian verifikasi ekuivalensi** | Kumpulan pengujian otomatis (*self-checking tests*) untuk memverifikasi bahwa respons data JSON 22 metrik produktivitas dan 5 aturan rekomendasi tidak mengalami perubahan semantik (*behavior preservation*). |
+| **Literatur ilmiah dan dokumentasi teknis** | Landasan teori, panduan metodologi *Experimental Software Engineering*, prinsip siklus refaktorisasi, serta acuan interpretasi hasil evaluasi kinerja perangkat lunak. |
+
+Bahan-bahan di atas dikelola dan diproses secara terintegrasi sepanjang tahapan penelitian guna menjamin validitas internal, akurasi pengukuran, serta keterulangan (reproducibility) eksperimen. 
+
+ 
+
+3.2. Jalannya Penelitian 
+
+Jalannya penelitian menggambarkan urutan kegiatan yang dilakukan secara bertahap dan sistematis dalam melaksanakan optimasi kinerja pada modul Decision Support System (DSS) Koladi. Mengingat penelitian ini berfokus pada evolusi perangkat lunak pada sistem yang telah berjalan (brownfield software evolution), jalannya penelitian dirancang dengan mengadopsi enam aktivitas baku dalam siklus hidup refaktorisasi (Refactoring Lifecycle) yang dirumuskan oleh Mens dan Tourwé (2004) serta berlandaskan prinsip-prinsip refaktorisasi oleh Fowler (2018). Tahapan penelitian meliputi: (1) Identifikasi Titik Hambatan, (2) Penentuan Strategi Optimasi, (3) Penjaminan Preservasi Perilaku, (4) Penerapan Refaktorisasi, (5) Penilaian Efek Kualitas, serta (6) Pemeliharaan Konsistensi Sistem. 
+
+
+| Fase | Aktivitas / Tahapan |
+| :---: | :--- |
+| **Fase 1** | Identifikasi Titik Hambatan |
+| **Fase 2** | Penentuan Strategi Optimasi |
+| **Fase 3** | Penjaminan Preservasi Perilaku |
+| **Fase 4** | Penerapan Refaktorisasi |
+| **Fase 5** | Penilaian Efek Kualitas |
+| **Fase 6** | Pemeliharaan Konsistensi Sistem |
+```[cite: 1]
+
+Gambar 1. Tahapan Penelitian 
+
+
+3.2.1. Identifikasi Titik Hambatan  
+
+Tahap Identifikasi Titik Hambatan dilakukan untuk mendeteksi komponen kode yang mengalami penurunan efisiensi kinerja (performance hot spots) pada modul DSS Koladi dalam kondisi awal sebelum optimasi, sejalan dengan prinsip Fowler (2018) untuk mengukur performa secara empiris menggunakan instrumen profiler dan tidak berspekulasi. Penelusuran difokuskan pada dua endpoint target, yaitu GET /statistik/suggestions dan GET /statistik/modal-data, dengan memanfaatkan perkakas diagnostik Laravel Telescope pada lingkungan pengembangan lokal sebagaimana dirumuskan pada Subbab 2.3.1. Penelusuran ini bertujuan memetakan pola pemanggilan basis data pada mekanisme snapshot relasional bawaan (workspace_performance_snapshots), mengidentifikasi gejala partial cache hit pada endpoint modal-data, mendeteksi pengambilan kolom yang berlebihan (unnecessary data retrieval) pada relasi assignedUsers, memeriksa keberadaan kueri berulang N+1 pada relasi checklists, serta mendeteksi eksekusi kueri di dalam perulangan (query-in-loop) pada kalkulasi distribusi beban kerja tim. Bukti temuan log kueri dari hasil profiling awal ini didokumentasikan sebagai bukti observasi awal pada Lampiran A. 
+
+3.2.2. Penentuan Strategi Optimasi  
+
+Tahap Penentuan Strategi Optimasi dilakukan untuk merancang teknik transformasi kode yang tepat guna mengeliminasi inefisiensi yang telah diidentifikasi pada tahap pertama, sebagaimana dirumuskan pada Subbab 2.3.2. Strategi optimasi yang dirancang menggabungkan restrukturisasi tingkat arsitektur penyimpanan sementara (caching) dan optimasi pada lapisan akses data Object-Relational Mapping (ORM). Pada lapisan caching, dirancang penerapan Redis Cache-Aside berbasis Redis 7.x untuk menggantikan penyimpanan snapshot di tabel basis data. Melalui strategi ini, seluruh hasil kalkulasi DSS pada endpoint GET /statistik/suggestions dan GET /statistik/modal-data disimpan langsung ke dalam memori Redis, sehingga sistem dapat langsung mengembalikan data dari memori tanpa perlu melakukan kueri ulang ke basis data PostgreSQL. Pada lapisan ORM, transformasi dirancang melalui penerapan selective eager loading (->with(['assignedUsers:id', 'checklists:id,task_id,is_done'])) guna membatasi atribut kolom yang ditarik sekaligus mengeliminasi kueri N+1 pada checklists, serta merestrukturisasi algoritma kalkulasi getWorkloadDistribution() dari query-in-loop menjadi penarikan data secara batch satu kali yang dilanjutkan dengan agregasi di dalam memori (in-memory aggregation). Rincian rancangan arsitektur dan alur kerja optimasi ini disajikan lebih lanjut pada Subbab 3.4. 
+
+3.2.3. Penjaminan Preservasi Perilaku (Guarantee Behavior Preservation) Tahap Penjaminan Preservasi Perilaku dilakukan untuk memastikan secara mutlak bahwa seluruh restrukturisasi internal kode yang dirancang tidak mengubah perilaku eksternal, fungsionalitas, maupun semantik sistem (behavior-preserving), sejalan dengan prinsip siklus refaktorisasi Mens dan Tourwé (2004) serta konsep Self-Testing Code dari Fowler (2018). Sebelum transformasi kode diterapkan secara luas, disusun rangkaian pengujian regresi otomatis (automated regression/equivalence tests) sebagaimana dijelaskan pada Subbab 2.3.3. Pengujian ini mengevaluasi dan membandingkan luaran payload JSON dari kalkulasi 22 metrik performa tim dan 5 komponen rekomendasi manajerial DSS antara kondisi sebelum dan sesudah refaktorisasi. Luaran sistem dinyatakan lolos tahap ini apabila seluruh nilai numerik dan struktur data respons terbukti menghasilkan nilai yang identik 100%, sehingga membuktikan bahwa optimasi kueri dan penerapan Redis tidak merusak validitas formula kalkulasi DSS. 
+
+3.2.4. Penerapan Refaktorisasi 
+
+Tahap Penerapan Refaktorisasi merupakan eksekusi aktual transformasi kode program pada modul DSS Koladi sesuai dengan rancangan strategi yang telah ditetapkan, sebagaimana dirumuskan pada Subbab 2.3.4. Transformasi kode dieksekusi pada basis kode Laravel 12 dengan memisahkan aktivitas refaktorisasi dari penambahan fitur baru sesuai metafora "The Two Hats" dari Fowler (2018). Penerapan kode mencakup refaktorisasi metode getTasksInPeriod(), getUrgentTasks(), dan getWorkloadDistribution() pada lapisan servis dan controller, pengaktifan driver Redis 7 sebagai cache store utama melalui integrasi servis SnapshotManager, serta restrukturisasi query-in-loop menjadi penarikan data secara batch satu kali dengan agregasi di dalam memori (in-memory aggregation). Seluruh perubahan kode dieksekusi secara bertahap dan terisolasi, serta diverifikasi kembali menggunakan pengujian ekuivalensi fungsional sebelum sistem dialihkan ke lingkungan pengujian performa. 
+
+3.2.5. Penilaian Efek Kualitas  
+
+Tahap Penilaian Efek Kualitas dilakukan untuk mengukur dan menilai dampak empiris dari refaktorisasi terhadap efisiensi kinerja sistem (software performance), mengacu pada tahapan evaluasi kualitas refaktorisasi menurut Mens dan Tourwé (2004) serta protokol Controlled Benchmarking (Henning & Hasselbring, 2022). Pengujian dilakukan secara sekuensial terisolasi di dalam jaringan kontainer Docker Compose (koladi_net) untuk membandingkan kondisi baseline dan optimized di bawah tiga skala dataset sintetis (Small, Medium, Large) yang dibangkitkan melalui seeder data, sebagaimana dirancang pada Subbab 2.4.1 dan 2.4.2. Pengumpulan data dijalankan menggunakan Node.js Benchmark Runner yang mengeksekusi 3 warm-up requests (dibuang) untuk mengeliminasi bias cold-start, dilanjutkan dengan 10 repetisi pengukuran valid pada kondisi steady-state, dengan pencatatan metrik internal dibantu oleh Middleware Instrumentasi Laravel. Hasil pengujian yang memuat 240 baris data observasi valid kemudian dianalisis menggunakan persentase perbaikan (Improvement Percentage) serta uji signifikansi Paired-Sample t-Test pada taraf α = 0.05 disertai evaluasi keterpaduan antara cache hit ratio dan SQL query count untuk membuktikan terjadinya full database bypass pada kondisi teroptimasi sebagaimana dirumuskan pada Subbab 2.4.4. 
+
+3.2.6. Pemeliharaan Konsistensi Sistem (Maintain Consistency)  
+
+Tahap Pemeliharaan Konsistensi Sistem dilakukan untuk memelihara keselarasan antara kode program yang telah direfaktorisasi dengan seluruh artefak rekayasa dan lingkungan eksekusi sistem (change propagation), sebagaimana dirumuskan pada Subbab 2.3.6. Kegiatan pada tahap ini mencakup tiga tindakan terintegrasi: pertama, memverifikasi stabilitas orkestrasi lingkungan kontainer Docker Compose (koladi_net) guna memastikan layanan Nginx, PHP-FPM, PostgreSQL 15, dan Redis 7 beroperasi secara harmonis; kedua, memverifikasi ketiadaan efek samping (side effects) pada modul manajemen tugas (Kanban) melalui pengujian regresi fungsional untuk memastikan bahwa modifikasi relasi model Eloquent dan dependensi servis tidak menimbulkan regresi atau mengganggu integritas operasi pembuatan tugas, pembaruan status, dan penugasan anggota; serta ketiga, memperbarui artefak nonkode berupa berkas konfigurasi deployment (.env.example), pembaruan diagram arsitektur sistem pada Subbab 3.4.1, serta penyelarasan dokumentasi teknis antarmuka API modul DSS Koladi. 
+
+ 
+
+ 
+
+ 
+
+ 
+
+3.3. Tahapan Pengembangan Aplikasi 
+
+Sistem Koladi yang digunakan dalam penelitian ini merupakan aplikasi collaborative virtual office berbasis Software as a Service (SaaS) yang telah berjalan dan menjadi objek studi kasus (brownfield software). Penelitian ini berfokus pada aktivitas rekayasa perangkat lunak (software engineering) berupa refaktorisasi basis kode (code refactoring) dan optimasi arsitektur penyimpanan sementara (in-memory caching) pada modul Decision Support System (DSS). Penelitian ini tidak mencakup pembangunan aplikasi dari awal (greenfield), penambahan fitur baru, perubahan alur bisnis, maupun perancangan ulang antarmuka pengguna (UI/UX). Oleh karena itu, metodologi pengembangan perangkat lunak konvensional yang ditujukan untuk pengembangan fitur baru dari awal seperti Waterfall, Agile/Scrum, maupun Rapid Application Development (RAD) tidak diterapkan sebagai metodologi utama penelitian. 
+
+Meskipun tidak menerapkan metodologi SDLC konvensional, penelitian ini tetap merupakan aktivitas rekayasa perangkat lunak yang sistematis dan terukur pada sistem Koladi. Metodologi rekayasa yang diterapkan berlandaskan pada enam tahapan siklus hidup refaktorisasi (Refactoring Lifecycle) menurut Mens dan Tourwé (2004). Melalui metodologi ini, seluruh modifikasi internal pada kode program difokuskan secara murni untuk mengeliminasi inefisiensi kueri dan latensi komputasi, dengan batasan mutlak bahwa perilaku teramati (observable behavior) dan fungsi sistem tetap dipertahankan secara utuh (behavior-preserving) (Fowler, 2018; Mens & Tourwé, 2004). Hal ini dibuktikan melalui kesetaraan hasil kalkulasi 22 metrik performa tim dan rekomendasi manajerial DSS antara sebelum dan sesudah optimasi. 
+
+Aktivitas rekayasa yang dieksekusi mencakup pemahaman arsitektur analitis DSS, profiling inefisiensi kueri dengan Laravel Telescope, perancangan integrasi Redis Cache-Aside, penerapan selective eager loading, serta restrukturisasi query-in-loop menjadi penarikan data secara batch dengan agregasi di dalam memori (in-memory aggregation). Dengan demikian, tahapan penelitian yang telah dirumuskan secara rinci pada Subbab 3.2 berfungsi sebagai metodologi dan alur utama pelaksanaan Tugas Akhir, sedangkan aplikasi Koladi berperan sebagai objek dan lingkungan studi kasus eksperimental. 
+
+3.4. Rencana Perancangan Sistem 
+
+Perancangan pada penelitian ini tidak berfokus pada pembangunan sistem aplikasi baru dari nol, melainkan pada penyiapan arsitektur optimasi caching, restrukturisasi kueri ORM, spesifikasi dataset sintetis, dan lingkungan eksperimen untuk modul Decision Support System (DSS) Koladi. Rancangan sistem meliputi gambaran umum sistem, alur komputasi modul DSS, rancangan dataset pengujian, rancangan transformasi kueri dan skema Redis, serta rancangan lingkungan pengujian. 
+
+3.4.1 Gambaran Umum Sistem 
+
+Koladi merupakan aplikasi perkantoran virtual kolaboratif (collaborative virtual office) berbasis web yang dibangun menggunakan Laravel sebagai framework aplikasi, PostgreSQL sebagai basis data relasional, dan Redis sebagai media in-memory caching. Sistem mengadopsi arsitektur Software as a Service (SaaS) multi-tenant dengan pemisahan data berdasarkan konteks workspace masing-masing. Alur akses data pada modul Decision Support System (DSS) yang menjadi fokus penelitian digambarkan pada Gambar 2. 
+
+| Komponen / Entitas | Deskripsi / Peran | Keterangan Alur |
+| :--- | :--- | :--- |
+| **User** | Pengguna Sistem[cite: 2] | Mengirimkan permintaan (*request*) ke antarmuka aplikasi[cite: 2] |
+| **Aplikasi Koladi** | Laravel 12[cite: 2] | Menerima dan meneruskan *request* ke modul analitis[cite: 2] |
+| **Modul DSS** | `DSSService` & `SnapshotManager`[cite: 2] | Mengelola logika kalkulasi keputusan dan alur *caching*[cite: 2] |
+| **Redis 7** | *In-Memory Cache* (Cache-Aside)[cite: 2] | Menyimpan dan memeriksa ketersediaan data *cache*[cite: 2] |
+| **PostgreSQL 15** | Eloquent ORM (`Tasks`, `Checklists`)[cite: 2] | Melayani persistensi data relasional (*read/write*) dua arah[cite: 2] |
+
+Gambar 2. Gambaran Umum Sistem dan Lingkungan Penelitian 
+
+Pada penelitian ini, fokus optimasi berada pada lapisan arsitektur penyimpanan sementara (caching) dan akses data Object-Relational Mapping (ORM) pada modul DSS. Source code Laravel digunakan sebagai target refaktorisasi kueri Eloquent, Redis digunakan untuk melayani permintaan data analitis secara instan dari memori RAM saat terjadi cache hit, sedangkan basis data PostgreSQL berfungsi sebagai media penyimpanan persisten tempat data relasional ditarik melalui kueri SQL saat terjadi cache miss. Seluruh interaksi komponen tersebut dijalankan di dalam jaringan kontainer Docker Compose (koladi_net) sebagai lingkungan eksperimen terkontrol untuk mengukur efektivitas optimasi terhadap response time, jumlah kueri SQL, alokasi memori, dan cache hit ratio

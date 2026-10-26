@@ -180,7 +180,11 @@ Benchmark dilakukan secara sekuensial menggunakan runner berbasis Node.js. Penel
 
 Dataset sintetis dihasilkan melalui Laravel Seeder dan Factory untuk mendukung pengujian terkontrol serta replikasi eksperimen.
 
-Instrumen pengukuran yang relevan meliputi Laravel Telescope untuk profiling, pencatatan kueri SQL, memory_get_peak_usage(), Redis INFO STATS, Redis INFO MEMORY, dan runner benchmark.
+Instrumen pengukuran yang digunakan terdiri atas rangkaian instrumen terpadu:
+1. Middleware Instrumentasi Laravel (pencatatan kueri SQL via DB::listen, memory peak usage via memory_get_peak_usage, dan rasio cache Redis).
+2. Node.js Benchmark Runner (eksekusi HTTP sekuensial terkontrol, protokol 3 warm-up dibuang + 10 repetisi valid, dan pencatatan response time end-to-end via process.hrtime).
+3. CSV Validator (skrip verifikasi otomatis keutuhan 240 baris matriks data berpasangan).
+4. Laravel Telescope (diisolasi khusus untuk diagnosis/profiling awal mendeteksi bottleneck kueri sebelum eksperimen).
 
 Rencana analisis statistik menggunakan paired-sample t-test dengan α = 0,05 dan perhitungan persentase perubahan atau peningkatan. Kesesuaian pasangan observasi, asumsi uji statistik, dan definisi perhitungan improvement harus diverifikasi sebelum analisis final.
 
@@ -199,36 +203,51 @@ Penelitian juga tidak mengklaim pengukuran independen terhadap kontribusi masing
 
 ## 12. Konteks Bab I yang Sudah Disusun
 
-Bab I mencakup:
+Bab I telah tuntas disusun pada `proposal.md` mencakup:
 - 1.1 Latar Belakang.
 - 1.2 Rumusan Masalah.
 - 1.3 Tujuan Penelitian.
 - 1.4 Batasan Masalah.
 - 1.5 Manfaat Penelitian.
 
-Rumusan masalah utama:
+Rumusan masalah (3 butir berstruktur simetris):
+1. Bagaimana merancang dan menerapkan strategi Redis Cache-Aside serta optimasi kueri Eloquent ORM (selective eager loading dan in-memory aggregation) pada endpoint GET /statistik/suggestions dan GET /statistik/modal-data modul DSS Koladi? *(Ranah Rekayasa)*
+2. Seberapa besar peningkatan kinerja modul DSS Koladi pada kondisi sesudah optimasi (optimized) dibandingkan kondisi sebelum optimasi (baseline), ditinjau dari parameter response time, SQL query count, memory utilization, dan cache hit ratio? *(Ranah Kuantitatif Terukur)*
+3. Seberapa besar pengaruh variasi skala volume dataset sintetis (Small, Medium, Large) terhadap efektivitas optimasi tersebut, serta apakah peningkatan performa yang dihasilkan terbukti signifikan secara statistik melalui paired-sample t-test? *(Ranah Skalabilitas & Uji Hipotesis)*
 
-Sejauh mana penerapan Redis Cache-Aside dan optimasi kueri ORM secara bersamaan memengaruhi kinerja modul DSS pada endpoint GET /statistik/suggestions dan GET /statistik/modal-data, ditinjau dari response time, SQL query count, memory utilization, dan cache hit ratio?
+Tujuan penelitian (korespondensi 1-ke-1 simetris):
+1. Menerapkan strategi Redis Cache-Aside serta optimasi kueri Eloquent ORM (selective eager loading dan in-memory aggregation) pada endpoint GET /statistik/suggestions dan GET /statistik/modal-data modul DSS Koladi.
+2. Membandingkan kinerja modul DSS sebelum (baseline) dan sesudah optimasi (optimized) berdasarkan parameter response time, SQL query count, memory utilization, dan cache hit ratio.
+3. Menganalisis pengaruh intervensi simultan tersebut di bawah variasi volume dataset sintetis (Small, Medium, Large) serta mengevaluasi signifikansi perbedaannya melalui paired-sample t-test dan persentase perbaikan performa.
 
-Tujuan penelitian:
-1. Menerapkan Redis Cache-Aside dan optimasi kueri ORM pada dua endpoint DSS tersebut.
-2. Membandingkan kinerja sebelum dan sesudah optimasi berdasarkan empat metrik.
-3. Menganalisis perubahan keempat metrik untuk mengevaluasi dampak kombinasi optimasi terhadap kinerja modul DSS.
+Batasan Masalah (1.4):
+1. Objek penelitian difokuskan secara eksklusif pada modul DSS Koladi (dua endpoint: GET /statistik/suggestions dan GET /statistik/modal-data).
+2. Intervensi optimasi dibatasi pada Redis Cache-Aside dan optimasi ORM (selective eager loading & batch in-memory aggregation).
+3. Formula 22 metrik dan kontrak respons API publik tidak diubah (behavior-preserving).
+4. Evaluasi dibatasi pada 4 metrik teknis kuantitatif: response time, SQL query count, memory utilization, dan cache hit ratio.
+5. Skenario pengujian menggunakan dataset sintetis Small (50/5), Medium (200/15), Large (500/30) dieksekusi secara sekuensial menghasilkan 240 observasi valid.
+6. Tidak mencakup concurrent load testing, stress testing, throughput, maupun persepsi/kepuasan pengguna (UX).
 
-Bab I menjadi landasan utama bagi penyusunan Bab II. Bab II harus menjelaskan teori dan bukti penelitian terdahulu yang relevan dengan masalah, teknik optimasi, metrik evaluasi, serta posisi kontribusi penelitian ini.
+## 12.B. Konteks Bab II yang Sudah Selesai Disusun
+
+Bab II telah selesai disusun 100% pada `proposal.md` (249 baris) dengan struktur metodologis yang kokoh:
+- **2.1. Penelitian Terkait:** Sintesis komparatif dari 5 studi utama mengenai optimasi Laravel, Redis caching, N+1 query ORM, memori ORM, dan benchmark sistem web.
+- **2.2. Landasan Teori:** Teori DSS berbasis web (Cai & Chen, 2021; Koornneef et al., 2020), Arsitektur Caching dan Redis (Privalov & Stupina, 2024; Taipalus, 2024; An & Cao, 2022), Teori Active Record & Inefisiensi Eloquent ORM (Alshemaimri et al., 2021; Turcotte et al., 2022; Yusmita et al., 2025), serta Profil Objek Penelitian Koladi.
+- **2.3. Metode Pengembangan Produk:** Mengadopsi kerangka kerja *Refactoring Lifecycle* (Mens & Tourwé, 2004) berlandaskan prinsip dasar *behavior-preserving* (Fowler, 2018), mencakup 6 langkah terstruktur: (2.3.1) Identifikasi Lokasi, (2.3.2) Penentuan Teknik, (2.3.3) Penjaminan Preservasi Perilaku via *automated equivalence tests* untuk 22 metrik & 5 rekomendasi, (2.3.4) Penerapan Refaktorisasi, (2.3.5) Evaluasi Efek Kualitas, dan (2.3.6) Pemeliharaan Konsistensi Sistem (Docker Compose stability, verifikasi ketiadaan efek samping pada modul Kanban, dan penyelarasan artefak nonkode).
+- **2.4. Metode Analisis yang Digunakan:** Mengadopsi *Experimental Software Engineering* (Wohlin et al., 2000, 2012) dengan rancangan *Controlled Before-After Benchmarking* sekuensial terisolasi. Meliputi 4 variabel terikat, 4 instrumen pengujian terpadu (Middleware Laravel, Node.js Runner, CSV Validator, Telescope), protokol 3 warm-up dibuang + 10 repetisi = 240 observasi valid, serta 4 tahapan analisis data (Deskriptif, Persentase Perbaikan, Paired-Sample t-Test α=0,05 dengan pelaporan $p < 0,001$ untuk data deterministik, dan Joint Cache Analysis).
 
 ## 13. File Sumber yang Akan Disediakan kepada AI Agent
 
-Saya akan menyediakan empat file utama:
+Saya akan menyediakan file utama:
 
 ### A. proposal.md
 
-Berisi isi Bab I yang telah disusun.
+Berisi naskah utuh Bab I dan Bab II yang telah selesai disusun secara lengkap.
 
 Fungsi:
-- Menjadi sumber utama untuk memahami narasi, masalah, tujuan, batasan, dan arah penelitian.
-- Menjadi acuan untuk menjaga kesinambungan antara seluruh bab
-- Menentukan istilah, ruang lingkup, dan formulasi masalah yang harus dipertahankan.
+- Menjadi sumber utama untuk memahami narasi, masalah, tujuan, batasan, teori, metodologi refaktorisasi, dan metode analisis.
+- Menjadi acuan untuk menjaga kesinambungan antara Bab I, Bab II, dan Bab III selanjutnya.
+- Menentukan istilah baku, ruang lingkup, dan formulasi masalah yang harus dipertahankan.
 
 Jika terdapat perbedaan antara ringkasan konteks ini dan isi terbaru proposal.md, prioritaskan proposal.md untuk redaksi dan ruang lingkup proposal yang sedang dikerjakan.
 
@@ -326,6 +345,4 @@ Sebelum menyusun suatu subbab:
 5. Susun argumentasi yang menjawab kebutuhan akademik subbab tersebut.
 6. Periksa kembali akurasi sitasi, angka, terminologi, dan konsistensi metodologis.
 
-Jangan langsung menulis hanya berdasarkan ringkasan master context jika file sumber tersedia. Master context ini berfungsi sebagai peta penelitian, sedangkan file sumber tetap menjadi acuan untuk fakta dan bukti terperinci.
-
-Fokus pekerjaan saat ini adalah menyusun Subbab 2.1 Penelitian Terkait berdasarkan lima studi yang sudah dikaji dalam Lit Review 1.md sampai Lit Review 3.md, dengan menjaga kesinambungan terhadap Bab I dalam proposal.md.
+Status Saat Ini: Bab I dan Bab II telah selesai disusun secara utuh dan terverifikasi di proposal.md. Fokus pekerjaan selanjutnya adalah penyusunan Bab III (Metodologi Penelitian, Alat dan Bahan, Alur Penelitian, serta Rencana Perancangan Sistem).

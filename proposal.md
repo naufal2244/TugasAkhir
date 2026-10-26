@@ -145,7 +145,7 @@ Menurut Mens & Tourwé (2004) dan Fowler (2018), tahap ini bertujuan mendeteksi 
 
 2.3.2. Penentuan Teknik Refaktorisasi (Determine Refactoring Techniques) 
 
-Menurut Mens & Tourwé (2004), tahap ini bertujuan memilih pola transformasi kode yang tepat untuk mengeliminasi kelemahan struktural dan inefisiensi yang telah diidentifikasi. Adapun yang akan dilakukan pada tahapan ini dalam konteks Tugas Akhir adalah merancang strategi optimasi backend terpadu, meliputi penentuan teknik selective eager loading (with(['assignedUsers:id', 'checklists:id,task_id,is_done'])), restrukturisasi algoritma perulangan menjadi batch retrieval dengan agregasi di dalam memori (in-memory aggregation), serta perancangan integrasi in-memory caching berbasis Redis menggunakan pola Cache-Aside dengan sinkronisasi invalidasi cache berbasis Eloquent Observers. 
+Menurut Mens & Tourwé (2004), tahap ini bertujuan memilih pola transformasi kode yang tepat untuk mengeliminasi kelemahan struktural dan inefisiensi yang telah diidentifikasi. Adapun yang akan dilakukan pada tahapan ini dalam konteks Tugas Akhir adalah merancang strategi optimasi backend terpadu, meliputi penentuan teknik selective eager loading (with(['assignedUsers:id', 'checklists:id,task_id,is_done'])), restrukturisasi algoritma perulangan menjadi batch retrieval dengan agregasi di dalam memori (in-memory aggregation), serta perancangan integrasi in-memory caching berbasis Redis menggunakan pola Cache-Aside guna mem-bypass akses basis data relasional pada alur pembacaan data (read path) analitis DSS. 
 
 2.3.3. Penjaminan Preservasi Perilaku (Guarantee Behavior Preservation) 
 
@@ -161,7 +161,7 @@ Menurut Mens & Tourwé (2004), tahap ini bertujuan menilai dan mengukur dampak k
 
 2.3.6. Pemeliharaan Konsistensi Sistem (Maintain Consistency) 
 
-Menurut Mens dan Tourwé (2004), tahap ini bertujuan memelihara konsistensi antara kode sumber yang telah direfaktorisasi dengan artefak perangkat lunak lainnya serta lingkungan eksekusi sistem (change propagation). Pada konteks tugas akhir ini, tahapan tersebut mencakup tiga tindakan terpadu: (1) memverifikasi stabilitas orkestrasi lingkungan eksekusi kontainer Docker Compose (koladi_net) guna memastikan seluruh layanan (Laravel 12, PostgreSQL 15, dan Redis 7) beroperasi secara normal; (2) memverifikasi ketiadaan efek samping (side effects) melalui pengujian regresi fungsional (functional regression testing) pada modul manajemen tugas (Kanban) guna memastikan integrasi TaskObserver dan TaskAssignmentObserver tidak mengganggu alur kerja penugasan; serta (3) menyelaraskan artefak nonkode berupa pembaruan berkas konfigurasi deployment (.env.example), diagram arsitektur sistem, dan dokumentasi teknis modul DSS Koladi. 
+Menurut Mens dan Tourwé (2004), tahap ini bertujuan memelihara konsistensi antara kode sumber yang telah direfaktorisasi dengan artefak perangkat lunak lainnya serta lingkungan eksekusi sistem (change propagation). Pada konteks Tugas Akhir ini, tahapan tersebut mencakup tiga tindakan terpadu: (1) memverifikasi stabilitas orkestrasi lingkungan eksekusi kontainer Docker Compose (koladi_net) guna memastikan seluruh layanan (Laravel 12, PostgreSQL 15, dan Redis 7) beroperasi secara normal; (2) memverifikasi ketiadaan efek samping (side effects) melalui pengujian regresi fungsional (functional regression testing) pada modul manajemen tugas (Kanban) guna memastikan modifikasi relasi model data dan dependensi servis tidak mengganggu alur kerja operasional penugasan; serta (3) menyelaraskan artefak nonkode berupa pembaruan berkas konfigurasi deployment (.env.example), diagram arsitektur sistem, dan dokumentasi teknis modul DSS Koladi. 
 
  
 
@@ -201,17 +201,17 @@ d. Cache Hit Ratio (%): Rasio keberhasilan permintaan yang dilayani langsung dar
 
 2.4.3. Instrumen dan Protokol Pengujian 
 
-Pengumpulan data kinerja dilakukan menggunakan rangkaian instrumen pengukuran terpadu: 
+Pengumpulan data kinerja dilakukan menggunakan rangkaian instrumen pengukuran terpadu (benchmark instrumentation suite) yang dikembangkan khusus untuk mengadopsi protokol pengujian perangkat lunak terkontrol (Wohlin et al., 2000; Henning & Hasselbring, 2022): 
 
-1. Middleware Instrumentasi Laravel: Berfungsi mencatat eksekusi kueri SQL dan alokasi memori internal secara otomatis pada setiap request yang membawa header khusus. 
+Laravel Telescope: Digunakan pada tahap profiling awal untuk mengidentifikasi keberadaan antipola kueri N+1 dan titik hambatan performa modul DSS 
 
-2. Node.js Benchmark Runner: Bertugas mengeksekusi permintaan HTTP secara sekuensial terkontrol serta merekam durasi response time dengan presisi tinggi. 
+Middleware Instrumentasi Laravel: Berfungsi mencatat eksekusi kueri SQL dan alokasi memori internal, serta rasio cache Redis secara otomatis pada setiap request yang membawa header khusus. 
 
-3. CSV Validator: Skrip pemverifikasi otomatis untuk memastikan keutuhan matriks, kelengkapan kombinasi variabel, dan integritas baris data sebelum dianalisis. 
+Node.js Benchmark Runner: Bertugas mengeksekusi permintaan HTTP secara sekuensial terkontrol serta merekam durasi response time dengan presisi tinggi. 
 
-4. Laravel Telescope: Digunakan pada tahap profiling awal untuk mendeteksi lokasi query bottleneck. 
+CSV Validator: Skrip pemverifikasi otomatis untuk memastikan keutuhan matriks, kelengkapan kombinasi variabel, dan integritas baris data sebelum dianalisis. 
 
-Untuk menjamin reliabilitas data dan mengeliminasi bias cold-start (seperti inisialisasi koneksi basis data, pengisian OPcache, dan JIT warming), setiap kombinasi perlakuan diawali dengan 3 kali warm-up requests yang nilainya dibuang dari analisis (Henning & Hasselbring, 2022; Traini et al., 2023; Japke et al., 2025). Setelah fase warm-up, pengujian dieksekusi sebanyak 10 repetisi valid secara berurutan, mengadaptasi skema repeated measurement dari Privalov & Stupina (2024) guna menangkap kestabilan performa (steady-state) serta meredam variasi fluktuasi sistem (Traini et al., 2023). Skema 10 repetisi ini juga menjamin struktur sampel berpasangan yang seimbang (balanced design) sebagai prasyarat uji Paired-Sample t-Test. Rancangan faktorial penuh (full factorial design) ini menghasilkan total matriks data valid sebesar: 
+Untuk memastikan data yang dicatat benar-benar stabil, setiap pengujian diawali dengan 3 kali permintaan pemanasan (warm-up requests). Data pemanasan ini dibuang dari analisis karena pada tahap awal server masih melakukan inisialisasi koneksi basis data dan pengisian memori cache internal (Henning & Hasselbring, 2022; Traini et al., 2023; Japke et al., 2025). Setelah fase warm-up, pengujian dieksekusi sebanyak 10 repetisi valid secara berurutan, mengadaptasi skema repeated measurement dari Privalov & Stupina (2024) guna menangkap kestabilan performa (steady-state) serta meredam variasi fluktuasi sistem (Traini et al., 2023). Skema 10 repetisi ini juga menjamin struktur sampel berpasangan yang seimbang (balanced design) sebagai prasyarat uji Paired-Sample t-Test. Rancangan faktorial penuh (full factorial design) ini menghasilkan total matriks data valid sebesar: 
 
 Total Data Valid = 3 Skala Data × 2 Endpoint × 2 Konfigurasi × 2 Kondisi Cache × 10 Repetisi = 240 Observasi Valid 
 

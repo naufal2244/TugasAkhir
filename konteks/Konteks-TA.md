@@ -236,113 +236,114 @@ Bab II telah selesai disusun 100% pada `proposal.md` (249 baris) dengan struktur
 - **2.3. Metode Pengembangan Produk:** Mengadopsi kerangka kerja *Refactoring Lifecycle* (Mens & Tourwé, 2004) berlandaskan prinsip dasar *behavior-preserving* (Fowler, 2018), mencakup 6 langkah terstruktur: (2.3.1) Identifikasi Lokasi, (2.3.2) Penentuan Teknik, (2.3.3) Penjaminan Preservasi Perilaku via *automated equivalence tests* untuk 22 metrik & 5 rekomendasi, (2.3.4) Penerapan Refaktorisasi, (2.3.5) Evaluasi Efek Kualitas, dan (2.3.6) Pemeliharaan Konsistensi Sistem (Docker Compose stability, verifikasi ketiadaan efek samping pada modul Kanban, dan penyelarasan artefak nonkode).
 - **2.4. Metode Analisis yang Digunakan:** Mengadopsi *Experimental Software Engineering* (Wohlin et al., 2000, 2012) dengan rancangan *Controlled Before-After Benchmarking* sekuensial terisolasi. Meliputi 4 variabel terikat, 4 instrumen pengujian terpadu (Middleware Laravel, Node.js Runner, CSV Validator, Telescope), protokol 3 warm-up dibuang + 10 repetisi = 240 observasi valid, serta 4 tahapan analisis data (Deskriptif, Persentase Perbaikan, Paired-Sample t-Test α=0,05 dengan pelaporan $p < 0,001$ untuk data deterministik, dan Joint Cache Analysis).
 
+## 12.C. Konteks Bab III yang Sudah Selesai Disusun
+
+Bab III telah selesai disusun secara komprehensif pada `proposal.md` dengan keselarasan penuh terhadap metodologi Bab II:
+- **3.1. Alat dan Bahan:** 
+  - *Alat (Tabel 2):* Perangkat keras komputasi (Apple M2 Pro, RAM 16 GB, SSD 1 TB, macOS Sequoia); lingkungan terkontainerisasi Docker Compose (`koladi_net`) mencakup PHP 8.2 / Laravel 12, PostgreSQL 15, dan Redis 7; serta rangkaian instrumen benchmark terpadu (Middleware `BenchmarkInstrumentation.php`, Node.js Benchmark Runner `benchmark-dss.js`, skrip `validate-csv.js`, dan Laravel Telescope untuk profiling kualitatif awal).
+  - *Bahan (Tabel 3):* Kode sumber modul DSS Koladi, rute dua endpoint analitis (`/suggestions` dan `/modal-data`), skema relasional basis data, dataset sintetis bertingkat (`ResearchDataSeeder.php`), data mentah CSV 240 observasi, rancangan refaktorisasi kode, skrip uji ekuivalensi, serta literatur pendukung.
+- **3.2. Jalannya Penelitian:** 
+  Mengadopsi enam aktivitas baku dalam siklus hidup refaktorisasi (*Refactoring Lifecycle*) Mens & Tourwé (2004) dan Fowler (2018):
+  1. *3.2.1. Identifikasi Titik Hambatan:* Profiling empiris kualitatif via Laravel Telescope mendeteksi kueri berulang pada tabel snapshot, partial cache hit modal-data, column over-fetching, N+1 checklists, dan query-in-loop per anggota (tercatat di Lampiran A).
+  2. *3.2.2. Penentuan Strategi Optimasi:* Perancangan Redis Cache-Aside menggantikan snapshot basis data, selective eager loading (`with(['assignedUsers:id', 'checklists:id,task_id,is_done'])`), dan batch retrieval dengan in-memory aggregation.
+  3. *3.2.3. Penjaminan Preservasi Perilaku:* Uji regresi otomatis memastikan output payload JSON 22 metrik dan 5 rekomendasi menghasilkan nilai 100% identik sebelum kode diubah.
+  4. *3.2.4. Penerapan Refaktorisasi:* Eksekusi transformasi kode pada `DSSService`, `SnapshotManager`, controller, dan aktivasi driver Redis 7.
+  5. *3.2.5. Penilaian Efek Kualitas:* Pengujian komparatif controlled benchmarking sekuensial terisolasi dalam Docker `koladi_net`, mengeksekusi 3 warm-up requests (dibuang) + 10 repetisi valid menghasilkan 240 data observasi valid (120 baseline dan 120 optimized).
+  6. *3.2.6. Pemeliharaan Konsistensi Sistem:* Verifikasi orkestrasi kontainer Docker, uji regresi fungsional ketiadaan efek samping pada modul Kanban, dan pembaruan artefak nonkode (.env, arsitektur, dokumentasi API).
+  *(Catatan: Mekanisme TaskObserver/invalidasi event berbasis event telah 100% dieliminasi dari naskah karena tidak pernah diukur before-after-nya pada pengujian read path).*
+- **3.3. Tahapan Pengembangan Aplikasi:**
+  Menegaskan penolakan metodologi SDLC konvensional (Waterfall, Agile/Scrum, RAD) karena penelitian bukan membangun aplikasi dari awal (*greenfield*), melainkan evolusi/refaktorisasi sistem berjalan (*brownfield software engineering*). Metodologi resmi yang diadopsi adalah *Refactoring Lifecycle* Mens & Tourwé (2004) dengan prinsip *behavior-preserving* (Fowler, 2018).
+- **3.4. Rencana Perancangan Sistem:**
+  - *3.4.1. Gambaran Umum Sistem:* Diagram 5 kotak arsitektur target (Gambar 2): Pengguna $\rightarrow$ Aplikasi Laravel 12 $\rightarrow$ Modul DSS $\rightarrow$ Redis 7 Cache-Aside $\leftrightarrow$ PostgreSQL 15.
+  - *3.4.2. Rancangan Alur Komputasi Modul DSS dan Cache-Aside:* Diagram sekuensial UML (Gambar 3) yang memodelkan alur *Cache Hit* (langsung dari RAM Redis, 0 kueri komputasi DSS) dan alur *Cache Miss* (eksekusi kueri ORM teroptimasi, kalkulasi 22 metrik, batch aggregation, dan penyimpanan payload utuh via `SETEX` berdurasi 3.600 detik).
+  - *3.4.3. Rancangan Dataset Pengujian:* Spesifikasi rancangan dataset sintetis deterministik via Laravel Seeder/Factory: Small (50 tugas/5 anggota), Medium (200 tugas/15 anggota), Large (500 tugas/30 anggota) dengan proporsi status 40% completed, 35% in progress, 25% to-do guna menguji batas beban N+1 checklists dan query-in-loop.
+  - *3.4.4. Rancangan Transformasi Kueri ORM dan Skema Cache Redis:* Dokumentasi transformasi sintaks Eloquent sebelum vs sesudah, serta skema kunci Redis hierarkis (`dss:{endpoint}:workspace_{id}:start_{date}:end_{date}`) untuk menjamin isolasi multi-tenant dan menyelesaikan masalah *partial cache hit* pada endpoint `modal-data`.
+  - *3.4.5. Rancangan Lingkungan Pengujian dan Instrumentasi:* Topologi jaringan Docker `koladi_net` (Gambar 5), arsitektur dual-layer instrumentation (Client Node.js runner dengan `process.hrtime.bigint()` dan Server Middleware dengan `DB::listen` serta `memory_get_peak_usage(true)`), dan spesifikasi statis komputer pengujian (Tabel 6).
+- **3.5. Rencana Analisis:**
+  Telah dirumuskan secara final dalam bentuk narasi padat tanpa tabel ekstra (mengikuti preseden Dzakwan) yang terbagi dalam 6 sub-subbab:
+  1. *3.5.1. Analisis Baseline:* Pengolahan 120 data observasi awal (Mean, SD, Min, Max) sebagai tolok ukur acuan pembanding dasar (*baseline reference*).
+  2. *3.5.2. Analisis Optimized:* Pengolahan 120 data observasi teroptimasi pada kondisi identik untuk menilai stabilitas performa sistem.
+  3. *3.5.3. Analisis Efisiensi Kueri SQL dan Penggunaan Memori:* Evaluasi eliminasi kueri N+1 checklists dan query-in-loop per anggota (deterministik $p < 0{,}001$), serta evaluasi penghematan alokasi RAM server PHP akibat selective eager loading.
+  4. *3.5.4. Analisis Response Time dan Skalabilitas Kinerja:* Evaluasi persentase perbaikan latensi (*Improvement %*) pada kondisi Cache Miss dan Cache Hit (kecepatan RAM vs disk), serta kurva ketahanan skalabilitas terhadap pertumbuhan volume data (Small $\rightarrow$ Medium $\rightarrow$ Large).
+  5. *3.5.5. Analisis Keterpaduan Cache Hit dan Akses Basis Data (Joint Cache Analysis):* Evaluasi terpadu antara Cache Hit Ratio dan SQL Query Count untuk membuktikan tercapainya *full database bypass* (0 kueri komputasi) pada Redis Cache-Aside dan tuntasnya masalah *partial cache hit* pada `modal-data`.
+  6. *3.5.6. Interpretasi Hasil dan Uji Hipotesis:* Uji signifikansi berpasangan *Paired-Sample t-Test* ($\alpha = 0{,}05$), ambang batas variasi acak (*measurement noise*) 3%, dan penegasan batasan generalisasi khusus pada modul DSS Koladi dan lingkungan pengujian terkontainerisasi lokal.
+
 ## 13. File Sumber yang Akan Disediakan kepada AI Agent
 
 Saya akan menyediakan file utama:
 
 ### A. proposal.md
 
-Berisi naskah utuh Bab I dan Bab II yang telah selesai disusun secara lengkap.
+Berisi naskah utuh proposal Tugas Akhir mencakup Bab I, Bab II, dan Bab III (Subbab 3.1 s.d. 3.4.5 lengkap, dan draf Subbab 3.5 siap disematkan).
 
 Fungsi:
-- Menjadi sumber utama untuk memahami narasi, masalah, tujuan, batasan, teori, metodologi refaktorisasi, dan metode analisis.
-- Menjadi acuan untuk menjaga kesinambungan antara Bab I, Bab II, dan Bab III selanjutnya.
+- Menjadi sumber utama untuk memahami narasi, masalah, tujuan, batasan, teori, metodologi refaktorisasi, perancangan sistem, dan metode analisis.
+- Menjadi acuan untuk menjaga kesinambungan antar-bab.
 - Menentukan istilah baku, ruang lingkup, dan formulasi masalah yang harus dipertahankan.
 
 Jika terdapat perbedaan antara ringkasan konteks ini dan isi terbaru proposal.md, prioritaskan proposal.md untuk redaksi dan ruang lingkup proposal yang sedang dikerjakan.
 
-### B. Lit Review 1.md
-### C. Lit Review 2.md
-### D. Lit Review 3.md
+### B. Berkas Log Sesi Penelitian (`TugasAkhir/log/`)
+- `Log1.md` s.d. `Log4.md`: Dokumentasi awal perumusan latar belakang, literatur review, dan draf Bab I-II.
+- `Log5.md`: Rangkuman pembersihan konsep Observer/Invalidasi event, penegasan 6 tahap Mens & Tourwé, dan audit berkas benchmark Git.
+- `Log6.md`: Dokumentasi penyusunan teknis Subbab 3.4.3 s.d. 3.4.5 (dataset sintetis, skema Redis, dual-layer instrumentation, dan spesifikasi hardware/software).
+- `Log7.md`: Dokumentasi perumusan dan penyederhanaan Subbab 3.5 (Rencana Analisis), klarifikasi peran Telescope vs. Benchmark Baseline, pemahaman Cache Hit Ratio, serta teks final Subbab 3.5 yang disepakati.
 
-Ketiga file tersebut berisi hasil kajian terhadap lima penelitian terdahulu yang sudah dipilih dan dianalisis.
+### C. Lit Review 1.md, Lit Review 2.md, Lit Review 3.md
 
-Fungsi:
-- Menjadi sumber utama untuk menyusun Subbab 2.1 Penelitian Terkait.
-- Menjadi dasar pengambilan informasi tentang tujuan, metode, objek, teknologi, metrik, hasil, keterbatasan, dan relevansi setiap studi.
-- Menjadi sumber untuk membandingkan penelitian terdahulu dan menyusun sintesis research gap.
-
-Jangan berasumsi bahwa setiap file berisi satu penelitian yang berbeda. Baca ketiganya sebagai satu kumpulan materi kajian, lalu identifikasi lima studi yang memang telah dipilih.
-
-Jangan menambah penelitian keenam atau mengganti studi yang telah dipilih tanpa instruksi eksplisit.
+Ketiga file tersebut berisi hasil kajian terhadap lima penelitian terdahulu yang sudah dipilih dan dianalisis untuk Subbab 2.1 Penelitian Terkait.
 
 ## 14. Kerangka Argumentasi Literatur yang Diharapkan
 
-Lima penelitian yang dipilih diarahkan untuk membangun alur argumentasi berikut. Alur ini merupakan panduan analitis, bukan kewajiban bahwa setiap studi hanya boleh masuk ke satu kategori.
-
-1. Penelitian mengenai optimasi performa aplikasi Laravel.
-   Tujuan: menjelaskan konteks teknologi yang paling dekat dengan Koladi dan bukti optimasi performa aplikasi berbasis Laravel.
-
-2. Penelitian mengenai Redis caching.
-   Tujuan: menjelaskan mekanisme caching, alasan teknis penggunaan Redis, serta dampaknya terhadap akses basis data dan response time.
-
-3. Penelitian mengenai masalah N+1 dan optimasi ORM.
-   Tujuan: menjelaskan bagaimana pola pengambilan relasi dan kueri yang tidak efisien dapat meningkatkan jumlah operasi basis data.
-
-4. Penelitian mengenai biaya memori akibat penggunaan ORM.
-   Tujuan: menjelaskan hubungan antara pengambilan kolom yang berlebihan, materialisasi objek, dan penggunaan memori server.
-
-5. Penelitian yang paling dekat dengan integrasi caching dan optimasi ORM.
-   Tujuan: menjadi pembanding utama untuk menilai persamaan, perbedaan, dan posisi kontribusi penelitian Koladi.
-
-Kelima studi harus disintesis secara komparatif. Jangan membuat lima ringkasan yang berdiri sendiri tanpa hubungan argumentatif.
+Lima penelitian yang dipilih diarahkan untuk membangun alur argumentasi berikut:
+1. Penelitian mengenai optimasi performa aplikasi Laravel (Putra et al., 2025).
+2. Penelitian mengenai Redis caching dan latensi basis data (Privalov & Stupina, 2024; Taipalus, 2024; An & Cao, 2022).
+3. Penelitian mengenai masalah N+1 dan optimasi ORM (Alshemaimri et al., 2021; Turcotte et al., 2022).
+4. Penelitian mengenai biaya memori akibat penggunaan ORM (Yusmita et al., 2025).
+5. Penelitian komparatif kombinasi caching dan optimasi ORM (Kundan & Makwana, 2025).
 
 ## 15. Prinsip Penyusunan Subbab 2.1 Penelitian Terkait
 
-Subbab 2.1 harus membantu menjawab:
-- Apa yang telah diteliti oleh penelitian sebelumnya?
-- Apa metode dan teknologi yang digunakan?
-- Apa hasil utama yang benar-benar dilaporkan?
-- Apa relevansinya dengan permasalahan teknis Koladi?
-- Apa persamaan dan perbedaannya dengan penelitian ini?
-- Apa keterbatasan atau ruang yang belum dijawab oleh studi-studi tersebut?
-- Bagaimana sintesisnya mendukung posisi penelitian ini?
-
-Perbandingan harus mencakup aspek yang memang tersedia dalam sumber, misalnya objek sistem, teknologi, strategi caching, teknik ORM, metrik pengukuran, desain eksperimen, hasil kuantitatif, dan batasan penelitian.
-
-Tidak semua aspek harus dipaksakan jika informasinya tidak tersedia.
-
-Research gap harus dirumuskan dari perbandingan konkret kelima studi. Hindari klaim absolut seperti "belum pernah ada penelitian" jika sumber yang tersedia hanya menunjukkan bahwa studi semacam itu tidak ditemukan dalam kumpulan literatur yang ditinjau.
-
-Penelitian ini memiliki fokus khusus pada kombinasi Redis Cache-Aside dan optimasi kueri ORM dalam jalur eksekusi DSS yang melakukan agregasi data aktivitas tim secara relasional, dengan empat metrik evaluasi dalam eksperimen terkontrol.
+Perbandingan harus mencakup objek sistem, teknologi, strategi caching, teknik ORM, metrik pengukuran, desain eksperimen, hasil kuantitatif, dan batasan penelitian tanpa membuat klaim absolut yang tidak didukung literatur.
 
 ## 16. Aturan Keakuratan Akademik
 
 1. Gunakan isi file sumber sebagai dasar utama.
 2. Jangan mengarang judul, penulis, tahun, nama jurnal, DOI, metode, hasil, persentase peningkatan, atau keterbatasan penelitian.
-3. Jangan menganggap angka dari suatu studi berlaku pada sistem Koladi.
-4. Bedakan hasil empiris penelitian terdahulu dari interpretasi penulis proposal.
-5. Jangan mengubah makna temuan hanya agar terlihat mendukung penelitian ini.
-6. Jika suatu informasi tidak ditemukan, nyatakan bahwa informasi tersebut tidak tersedia dalam sumber.
-7. Jika terdapat ketidakkonsistenan antardokumen, tandai dan minta klarifikasi atau gunakan sumber yang lebih otoritatif sesuai konteks.
-8. Jangan menambahkan referensi eksternal tanpa kebutuhan dan izin yang jelas.
-9. Pertahankan sitasi yang dapat ditelusuri ke sumbernya.
-10. Jangan menggunakan sumber yang hanya disebut secara sekilas seolah-olah sudah dibaca dan diverifikasi secara penuh.
-11. Hindari klaim kausal yang lebih kuat daripada desain penelitian yang dilaporkan.
-12. Gunakan bahasa Indonesia akademik yang alami, lugas, dan tidak bertele-tele.
+3. Bedakan hasil empiris penelitian terdahulu dari interpretasi penulis proposal.
+4. Jangan menambahkan referensi eksternal tanpa kebutuhan dan izin yang jelas.
+5. Pertahankan sitasi yang dapat ditelusuri ke sumbernya.
+6. Hindari klaim kausal yang lebih kuat daripada desain penelitian yang dilaporkan.
+7. Gunakan bahasa Indonesia akademik yang alami, lugas, dan tidak bertele-tele.
 
 ## 17. Gaya Penulisan yang Diinginkan
 
-Gunakan bahasa Indonesia akademik untuk proposal, dengan ketentuan:
 - Formal, jelas, dan logis.
 - Mengutamakan sintesis daripada repetisi.
 - Satu paragraf memiliki gagasan utama yang jelas.
 - Transisi antarparagraf menunjukkan hubungan argumentasi.
 - Istilah teknis dipertahankan secara konsisten.
-- Tidak memakai kalimat generik yang sekadar menyatakan bahwa teknologi tertentu penting atau berkembang pesat tanpa dukungan sumber.
-- Tidak menambahkan klaim normatif yang tidak diperlukan.
+- Tidak memakai kalimat generik yang sekadar menyatakan bahwa teknologi tertentu penting tanpa sumber.
 - Tidak mengulang isi Bab I secara panjang lebar.
-- Tidak menggunakan gaya promosi untuk aplikasi Koladi.
-- Tidak menyamakan peningkatan performa teknis dengan peningkatan kepuasan pengguna.
+- Tidak menyamakan peningkatan performa teknis dengan peningkatan kepuasan pengguna (UX).
 
 ## 18. Instruksi Umum untuk AI Agent
 
-Sebelum menyusun suatu subbab:
+Sebelum menyusun atau mereview suatu subbab:
 1. Identifikasi bagian proposal yang sedang dikerjakan dan fungsinya.
-2. Baca file yang relevan secara menyeluruh atau pada bagian yang benar-benar dibutuhkan.
-3. Petakan bukti yang tersedia sebelum menulis.
-4. Periksa kesesuaian antara sumber literatur dan narasi Bab I.
-5. Susun argumentasi yang menjawab kebutuhan akademik subbab tersebut.
-6. Periksa kembali akurasi sitasi, angka, terminologi, dan konsistensi metodologis.
+2. Baca file yang relevan secara menyeluruh.
+3. Petakan bukti empiris yang tersedia sebelum menulis.
+4. Periksa kesesuaian antara sumber literatur dan narasi bab-bab sebelumnya.
+5. Periksa kembali akurasi sitasi, angka, terminologi, dan konsistensi metodologis.
 
-Status Saat Ini: Bab I dan Bab II telah selesai disusun secara utuh dan terverifikasi di proposal.md. Fokus pekerjaan selanjutnya adalah penyusunan Bab III (Metodologi Penelitian, Alat dan Bahan, Alur Penelitian, serta Rencana Perancangan Sistem).
+**Status Saat Ini:**
+- **Bab I:** Selesai 100% dan terverifikasi di `proposal.md`.
+- **Bab II:** Selesai 100% (Subbab 2.1 s.d. 2.4) dan terverifikasi di `proposal.md`.
+- **Bab III:** 
+  - Subbab 3.1, 3.2, 3.3, dan 3.4 telah selesai disusun secara lengkap di `proposal.md`.
+  - Subbab 3.5 (Rencana Analisis) telah selesai dirumuskan dan disederhanakan secara final di `Log7.md`.
+- **Fokus Pekerjaan Selanjutnya:** 
+  1. Menyematkan naskah final Subbab 3.5 dari `Log7.md` ke dalam `proposal.md`.
+  2. Melakukan audit nomor urut tabel dan gambar pada Bab III agar terstruktur rapi.
+  3. Menyusun Lampiran A (bukti profiling Laravel Telescope).
+  4. Pemeriksaan akhir konsistensi proposal sebelum pengujian sidang proposal.

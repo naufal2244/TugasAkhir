@@ -378,3 +378,208 @@ Koladi merupakan aplikasi perkantoran virtual kolaboratif (collaborative virtual
 Gambar 2. Gambaran Umum Sistem dan Lingkungan Penelitian 
 
 Pada penelitian ini, fokus optimasi berada pada lapisan arsitektur penyimpanan sementara (caching) dan akses data Object-Relational Mapping (ORM) pada modul DSS. Source code Laravel digunakan sebagai target refaktorisasi kueri Eloquent, Redis digunakan untuk melayani permintaan data analitis secara instan dari memori RAM saat terjadi cache hit, sedangkan basis data PostgreSQL berfungsi sebagai media penyimpanan persisten tempat data relasional ditarik melalui kueri SQL saat terjadi cache miss. Seluruh interaksi komponen tersebut dijalankan di dalam jaringan kontainer Docker Compose (koladi_net) sebagai lingkungan eksperimen terkontrol untuk mengukur efektivitas optimasi terhadap response time, jumlah kueri SQL, alokasi memori, dan cache hit ratio
+
+
+3.4.2. Rancangan Alur Komputasi Modul DSS dan Cache-Aside  
+
+Modul Decision Support System (DSS) pada aplikasi Koladi bertugas memproses data aktivitas kerja tim yang saling berelasi menjadi indikator kinerja dan rekomendasi manajerial yang dapat ditindaklanjuti secara tepat waktu sebagaimana dikonseptualisasikan pada Subbab 2.2.1. Layanan analitis ini disajikan secara spesifik melalui dua endpoint utama, yaitu GET /statistik/suggestions untuk menyajikan rekomendasi berbasis aturan evaluasi performa kerja tim, serta GET /statistik/modal-data untuk menyajikan payload analitis komprehensif yang memuat ringkasan metrik utama, daftar tugas mendesak, dan sebaran beban kerja anggota tim. Di lapisan backend, alur komputasi analitis menggabungkan dua pilar rekayasa utama: orkestrasi kalkulasi analitis melalui Eloquent ORM pada DSSService, serta kontrol alur pembacaan data (read path) melalui pola Redis Cache-Aside pada SnapshotManager. DSSService mengoordinasikan empat komponen kalkulasi inti: MetricsCalculator (menghitung 22 metrik produktivitas mentah dari data tugas dan relasi checklists), TrendAnalyzer (menganalisis komparasi fluktuasi kinerja antar-periode), RecommendationEngine (mengklasifikasikan status performa dan merumuskan saran tindakan manajerial), serta fungsi pendukung controller getUrgentTasks() dan getWorkloadDistribution(). Berbeda dengan konfigurasi awal (baseline) yang menyimpan metrik ke dalam tabel relasional PostgreSQL (workspace_performance_snapshots) dan mengeksekusi kueri ORM yang memicu N+1 query serta loop kueri per anggota sebagaimana diidentifikasi pada Subbab 3.2.1, rancangan arsitektur teroptimasi mengintegrasikan Redis 7 sebagai cache store dan merefaktorisasi akses data Eloquent ORM menjadi selective eager loading serta penarikan batch satu kali, sejalan dengan strategi yang dirumuskan pada Subbab 2.3.2 dan Subbab 3.2.2. Interaksi sekuensial antar-komponen dalam melayani permintaan data analitis DSS tersebut dimodelkan pada Gambar 3. 
+
+sequenceDiagram
+    autonumber
+    actor User as Pengguna (Browser)
+    participant Ctrl as StatistikController
+    participant SM as SnapshotManager
+    participant Cache as Redis 7 (In-Memory)
+    participant DSS as DSSService & Pipeline
+    participant ORM as Eloquent ORM (Task & Checklist)
+    participant DB as PostgreSQL 15
+    User->>Ctrl: HTTP GET /suggestions atau /modal-data
+    Ctrl->>SM: Cek ketersediaan cache analitis workspace
+    SM->>Cache: Periksa kunci cache (GET dss:workspace:{id}:{endpoint})
+    
+    alt Kondisi Cache Hit (Data Tersedia di RAM Redis)
+        Cache-->>SM: Kembalikan payload JSON utuh
+        SM-->>Ctrl: Payload analitis siap saji
+        Ctrl-->>User: HTTP 200 OK (0 Kueri Komputasi DSS)
+    else Kondisi Cache Miss (Data Belum Tersedia di Redis)
+        Cache-->>SM: Nilai kosong (Null / Cache Miss)
+        SM->>DSS: Picu pipeline kalkulasi analitis
+        
+        Note over DSS,DB: Alur Eksekusi Kueri Eloquent ORM Teroptimasi
+        DSS->>ORM: getTasksInPeriod() via Task::with(['assignedUsers:id', 'checklists:id,task_id,is_done'])
+        ORM->>DB: Eksekusi SQL Tasks & Checklists (Batch Eager Loading)
+        DB-->>ORM: Kembalikan result set data relasional
+        ORM-->>DSS: Hydrate ke Collection Model (Atribut Terbatas)
+        
+        DSS->>DSS: MetricsCalculator hitung 22 metrik produktivitas
+        DSS->>DSS: TrendAnalyzer & RecommendationEngine evaluasi aturan
+        
+        opt Khusus Endpoint /modal-data (Kalkulasi Beban Kerja & Urgent Tasks)
+            DSS->>ORM: Penarikan batch data penugasan anggota (1 kali kueri)
+            ORM->>DB: Eksekusi SQL Batch Tugas & Anggota
+            DB-->>ORM: Kembalikan dataset tugas aktif
+            ORM-->>DSS: Collection data penugasan
+            DSS->>DSS: Agregasi in-memory distribusi beban kerja & filter urgent tasks
+        end
+        
+        DSS->>SM: Kembalikan payload analitis lengkap
+        SM->>Cache: Simpan payload utuh ke Redis (SETEX dss:key)
+        SM-->>Ctrl: Diteruskan ke controller
+        Ctrl-->>User: HTTP 200 OK (Respons Tersaji Lengkap)
+    end
+
+    Gambar 3. Diagram Sekuensial Alur Komputasi Modul DSS, Pola Cache-Aside, dan Eksekusi Eloquent ORM 
+
+Berdasarkan rancangan alur pada Gambar 3, setiap permintaan analitis yang diterima oleh StatistikController terlebih dahulu diarahkan ke SnapshotManager untuk memeriksa ketersediaan data pada lapisan in-memory Redis 7. Pada kondisi cache hit, sistem langsung mengambil payload JSON dari memori Redis dan mengembalikannya ke pengguna tanpa perlu mengeksekusi pipeline komputasi DSS maupun mengakses PostgreSQL 15, sehingga kueri yang dieksekusi untuk komputasi analitis terpangkas menjadi 0 kueri (full database bypass). Pemanfaatan memori RAM yang memiliki latensi jauh lebih rendah dibandingkan pembacaan disk basis data (Taipalus, 2024; Privalov & Stupina, 2024 sebagaimana diulas pada Subbab 2.2.2) memungkinkan response time dipangkas secara drastis serta tetap stabil tanpa terpengaruh oleh besarnya volume data kerja tim. 
+
+Sebaliknya, pada kondisi cache miss, sistem mengeksekusi penarikan data ke PostgreSQL 15 melalui kueri Eloquent yang telah direfaktorisasi menggunakan teknik selective eager loading (->with(['assignedUsers:id', 'checklists:id,task_id,is_done'])). Pembatasan atribut kolom pada assignedUsers menekan pemborosan alokasi memori akibat materialisasi objek model yang berlebihan (Yusmita et al., 2025), sedangkan pemuatan relasi checklists secara eager loading mengeliminasi antipola N+1 query pada pemanggilan getProgressPercentage() di setiap tugas (Turcotte et al., 2022). Setelah objek tugas dimuat, MetricsCalculator menghitung 22 metrik produktivitas mentah yang kemudian dianalisis oleh TrendAnalyzer dan RecommendationEngine untuk merumuskan saran manajerial. Khusus pada endpoint modal-data, fungsi getWorkloadDistribution() yang semula mengeksekusi kueri Task::whereHas() berulang di dalam perulangan anggota ditransformasikan menjadi penarikan data penugasan secara batch satu kali yang dilanjutkan dengan agregasi langsung di dalam memori server (in-memory aggregation). 
+
+Keunggulan utama dari perancangan alur komputasi ini dibandingkan mekanisme baseline adalah penyelesaian masalah partial cache hit pada endpoint GET /statistik/modal-data. Pada kondisi baseline, mekanisme snapshot relasional hanya menampung indikator metrik utama, sementara komputasi tugas mendesak dan distribusi beban kerja tetap dieksekusi ulang ke basis data pada setiap permintaan. Melalui rancangan alur Cache-Aside yang terintegrasi ini, SnapshotManager mengonsolidasikan seluruh struktur data respons analitis, mencakup metrik utama, 22 metrik performa, daftar urgent tasks, serta sebaran beban kerja hasil agregasi in-memory ke dalam satu payload utuh yang disimpan ke Redis menggunakan perintah SETEX. Dengan demikian, permintaan identik berikutnya dijamin terlayani sepenuhnya dari lapisan memori cepat tanpa menyisakan beban kueri komputasi pada basis data PostgreSQL 15. Penjelasan teknis mengenai perbandingan sintaks kueri ORM sebelum dan sesudah refaktorisasi serta struktur skema kunci Redis disajikan lebih lanjut pada Subbab 3.4.4. 
+
+ 
+
+3.4.3. Rancangan Dataset Pengujian  
+
+Pengujian efisiensi kinerja pada modul Decision Support System (DSS) Koladi memerlukan perancangan dataset pengujian terkontrol guna mengevaluasi beban pemrosesan analitis pada aplikasi perkantoran virtual kolaboratif (collaborative virtual office). Seluruh dataset yang digunakan dalam penelitian ini merupakan data sintetis terstruktur (seeded dataset) yang dibangkitkan secara otomatis menggunakan skrip seeder dan factory Laravel berbasis pustaka Faker, bukan berasal dari rekaman log produksi riil. Pendekatan data sintetis ini diadopsi mengikuti metodologi eksperimen perangkat lunak terkontrol (controlled software experiment), di mana data produksi riil umumnya memiliki distribusi relasi yang acak, tidak seimbang, dan dinamis sehingga rentan menjadi variabel perancu (confounding variables) yang merusak validitas pengukuran (Yusmita et al., 2025). Penggunaan skrip seeder memberikan kendali penuh terhadap volume entitas, proporsi status tugas, serta kepadatan relasi tugas-anggota secara deterministik. Karakteristik deterministik ini menjamin keterulangan pengujian (bit-for-bit reproducibility) sekaligus memastikan bahwa konfigurasi baseline dan optimized dievaluasi pada kondisi data yang persis sama (Sasmoko et al., 2024; Yusmita et al., 2025). 
+
+Dalam perancangan eksperimen, volume data disusun ke dalam tiga skenario bertingkat guna menganalisis kecenderungan perubahan performa dan stabilitas sistem seiring dengan pertumbuhan volume entitas relasional yang diproses dalam satu siklus request terkontrol (Wohlin et al., 2000; Henning & Hasselbring, 2022). Pengujian pada volume tunggal berisiko menghasilkan kesimpulan semu yang hanya berlaku pada ukuran data tertentu, sedangkan variasi bertingkat memungkinkan pembuktian empiris apakah optimasi yang diterapkan mampu menahan degradasi performa ketika volume data membesar (Henning & Hasselbring, 2022; Yusmita et al., 2025). 
+
+Penetapan skala dataset pada penelitian ini disesuaikan dengan unit analisis modul DSS Koladi yang beroperasi pada lingkup per-workspace, bukan kueri agregat terhadap keseluruhan tabel basis data aplikasi. Tiga skala volume data dirancang untuk menyimulasikan tingkat kepadatan data yang berbeda pada sebuah workspace: 
+
+Skala Small (50 tugas dan 5 anggota): Menyimulasikan tingkat kepadatan data rendah dengan rasio rata-rata 10 tugas per anggota. 
+
+Skala Medium (200 tugas dan 15 anggota): Menyimulasikan tingkat kepadatan data moderat dengan rasio rata-rata 13 hingga 14 tugas per anggota. 
+
+Skala Large (500 tugas dan 30 anggota): Menyimulasikan tingkat kepadatan data tinggi dengan rasio rata-rata 16 hingga 17 tugas per anggota. 
+
+Variasi bertingkat pada jumlah tugas dan anggota tersebut dirancang secara terukur sebagai pemicu beban (workload stressor) untuk mengevaluasi dua titik inefisiensi kueri Eloquent ORM yang telah diidentifikasi pada Subbab 2.2.3 dan Subbab 3.2.1. Peningkatan jumlah tugas (50, 200, dan 500) dirancang untuk memicu eskalasi antipola N+1 query pada relasi checklists saat kalkulasi progres tugas dieksekusi, sejalan dengan prinsip Turcotte et al. (2022) bahwa inefisiensi lazy loading melipatgandakan kueri basis data secara linier terhadap jumlah entitas yang diproses. Skala 500 tugas ditetapkan sebagai batas atas pengujian karena pada konfigurasi baseline telah memicu hingga 696 kueri SQL dalam satu siklus permintaan HTTP (dengan waktu respons mencapai 679 ms), sehingga beban komputasi tersebut telah memadai untuk mengamati batas degradasi performa sebelum melampaui alokasi memori runtime PHP pada lingkungan lokal. Sementara itu, peningkatan jumlah anggota workspace (5, 15, dan 30 anggota) dirancang berdasarkan jumlah iterasi perulangan untuk menguji eliminasi antipola kueri di dalam perulangan (query-in-loop) pada fungsi getWorkloadDistribution(). Sebagaimana disurvei oleh Alshemaimri et al. (2021) mengenai fragmen kode basis data bermasalah (problematic database code fragments), pengeksekusian kueri di dalam iterasi memicu pertumbuhan beban kueri secara linier yang berbanding lurus dengan banyaknya entitas anggota yang diiterasi. Dengan mengevaluasi rentang 5 hingga 30 anggota, penelitian ini membuktikan secara empiris bahwa transformasi algoritma menjadi penarikan batch satu kali dengan agregasi di dalam memori (in-memory aggregation) berhasil memangkas eksekusi kueri menjadi bernilai tetap atau konstan, tanpa lagi dipengaruhi oleh penambahan jumlah anggota tim. Rincian spesifikasi ketiga skenario dataset pengujian disajikan pada Tabel 5. 
+
+Tabel 5. Spesifikasi Rancangan Dataset Pengujian 
+
+| Skenario Dataset | Jumlah Tugas | Jumlah Anggota | Distribusi Status Tugas |
+|---|---|---|---|
+| Small | 50 tugas | 5 pengguna | 40% Completed (20 tugas)<br>35% In Progress (17 tugas)<br>25% To-Do (13 tugas) |
+| Medium | 200 tugas | 15 pengguna | 40% Completed (80 tugas)<br>35% In Progress (70 tugas)<br>25% To-Do (50 tugas) |
+| Large | 500 tugas | 30 pengguna | 40% Completed (200 tugas)<br>35% In Progress (175 tugas)<br>25% To-Do (125 tugas) |
+
+
+
+Selain volume data, proporsi status tugas di dalam setiap skenario dikunci secara konsisten pada rasio 40% selesai (completed), 35% dalam proses (in progress), dan 25% belum selesai (to-do), serta dilengkapi subset tugas yang melewati batas waktu (overdue). Pengaturan proporsi ini diperlukan secara fungsional agar seluruh formula dari 22 metrik produktivitas (seperti completion rate, backlog ratio, dan delay rate) serta aturan rekomendasi manajerial pada modul DSS dapat tereksekusi secara valid tanpa menghasilkan nilai pembagian nol atau luaran numerik yang trivial. 
+
+Dataset yang digunakan pada pengujian konfigurasi baseline dan optimized dibuat 100% identik pada setiap skenario volume data. Dengan menyeragamkan volume, relasi, dan parameter filter data antara kedua konfigurasi, variasi hasil pengukuran pada empat metrik performa (response time, SQL query count, memory utilization, dan cache hit ratio) dapat diisolasi dan diatribusikan secara sahih sebagai dampak langsung dari intervensi arsitektur Redis Cache-Aside dan optimasi kueri ORM, bukan akibat fluktuasi struktur data (Wohlin et al., 2000; Yusmita et al., 2025), sekaligus memenuhi asumsi dependensi data berpasangan untuk pengujian statistik paired-sample t-test (Uddin & Lu, 2024). 
+
+ 
+
+3.4.4. Rancangan Transformasi Kueri ORM dan Skema Cache Redis  
+
+Perancangan optimasi backend pada modul Decision Support System (DSS) Koladi berfokus pada dua pilar rekayasa utama: restrukturisasi kueri pada lapisan Object-Relational Mapping (ORM) Eloquent serta perancangan skema penyimpanan data sementara pada in-memory cache Redis 7. Sebagaimana telah dimodelkan dalam alur komputasi pada Subbab 3.4.2, efisiensi penarikan data ke basis data PostgreSQL 15 menjadi penentu utama latensi sistem ketika terjadi cache miss, sedangkan efektivitas skema penyimpanan di dalam Redis menentukan apakah permintaan berulang dapat dilayani sepenuhnya dari memori cepat (full database bypass) tanpa menyisakan beban kueri relasional. 
+
+3.4.4.1. Rancangan Transformasi Kueri Eloquent ORM 
+
+Transformasi kueri difokuskan pada dua metode komputasi analitis yang sebelumnya memicu inefisiensi kueri basis data, sebagaimana diilustrasikan pada Gambar 4. 
+
+<?php
+
+// ==========================================
+// KASUS 1: Refactoring getTasksInPeriod() 
+// Lokasi: app/Services/DSS/MetricsCalculator.php
+// ==========================================
+
+
+// Before: getTasksInPeriod()
+->with(['assignedUsers'])
+
+// After: getTasksInPeriod()
+->with(['assignedUsers:id', 'checklists:id,task_id,is_done'])
+
+// ==========================================
+// KASUS 2: Refactoring getWorkloadDistribution()
+// Lokasi: app/Services/DSS/StatistikController.php
+// ==========================================
+
+
+// Before: getWorkloadDistribution()
+foreach ($members as $member) {
+    Task::whereHas('assignedUsers', ...)->get();
+}
+
+// After: getWorkloadDistribution()
+$tasks = Task::with(['assignedUsers:id'])->where(...)->get();
+
+foreach ($members as $member) {
+    $memberTasks = $tasks->filter(...);
+}
+
+
+Pada metode getTasksInPeriod(), konfigurasi baseline mengeksekusi eager loading tanpa pembatasan kolom (->with(['assignedUsers'])) serta mengabaikan relasi checklists. Pola ini memicu antipola Unnecessary Data Retrieval yang memboroskan memori PHP (Alshemaimri et al., 2021; Yusmita et al., 2025), sekaligus menimbulkan masalah N+1 kueri saat kalkulasi progres memanggil relasi checklists secara lazy loading (Turcotte et al., 2022). Melalui refaktorisasi, sintaks ditransformasikan menjadi ->with(['assignedUsers:id', 'checklists:id,task_id,is_done']). Pembatasan kolom menekan beban serialisasi objek pada RAM, sedangkan eager loading selektif mengompresi ratusan kueri terpisah pada relasi checklists menjadi 1 kueri tunggal yang bernilai konstan. 
+
+Sementara itu, inefisiensi pada metode getWorkloadDistribution() terjadi akibat penempatan kueri kondisional Task::whereHas() di dalam blok perulangan anggota workspace (foreach ($members)). Pola query-in-loop ini menyebabkan volume kueri membengkak secara linier seiring penambahan jumlah anggota tim (Alshemaimri et al., 2021). Refaktorisasi dilakukan dengan menarik seluruh data tugas aktif secara batch di luar blok perulangan menggunakan Task::with(['assignedUsers:id'])->where(...)->get(). Selanjutnya, pembagian beban kerja per anggota diproses sepenuhnya di dalam memori PHP menggunakan operasi filter koleksi $tasks->filter(...). Melalui pendekatan in-memory aggregation ini, eksekusi ke basis data PostgreSQL tereduksi menjadi 1 kueri konstan yang sepenuhnya independen dari penambahan jumlah anggota ruang kerja. 
+
+3.4.4.2. Rancangan Skema Cache Redis 
+
+Sebagai pengganti mekanisme snapshot relasional baseline yang masih memicu pembacaan ke PostgreSQL, perancangan lapisan caching memanfaatkan Redis 7.x dengan driver phpredis melalui Laravel Redis facade. Struktur penyimpanan dirancang untuk menjamin isolasi data multi-tenant serta menyelesaikan masalah partial cache hit, sebagaimana disajikan pada Tabel 5. 
+
+Tabel 5. Spesifikasi Skema Kunci dan Struktur Penyimpanan Redis Cache-Aside 
+
+
+
+
+
+Berdasarkan rancangan pada Tabel 5, penamaan kunci Redis mengadopsi struktur hierarkis berpemisah titik dua (:) dengan menyertakan pengenal unik ruang kerja (workspace_{workspace_id}) serta rentang tanggal evaluasi guna menjamin isolasi data multi-tenant antar-workspace. Setiap respons analitis dibungkus secara utuh ke dalam format teks JSON dan disimpan menggunakan perintah SETEX berdurasi 3.600 detik (1 jam) sebagai batas retensi memori RAM server. 
+
+Pendekatan penyimpanan payload utuh pada kedua endpoint ini memastikan eliminasi kueri komputasi analitis secara penuh saat terjadi cache hit. Khusus pada endpoint /modal-data, penyimpanan seluruh komponen analitis—termasuk daftar tugas mendesak (urgent tasks) dan sebaran beban kerja tim (workload distribution)—ke dalam Redis menuntaskan masalah partial cache hit yang terjadi pada konfigurasi baseline, di mana kedua komponen tersebut sebelumnya selalu memicu komputasi ulang ke PostgreSQL. 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+3.4.5. Rancangan Lingkungan Pengujian dan Instrumentasi  
+
+Pengujian performa pada modul DSS Koladi dilaksanakan pada lingkungan komputasi lokal yang terisolasi dan terkendali guna menjamin validitas internal serta keterulangan (reproducibility) eksperimen. Berbeda dari pengujian basis data konvensional yang mengeksekusi kueri secara langsung pada DBMS, pengujian pada penelitian ini mengevaluasi siklus permintaan-respons HTTP secara menyeluruh (end-to-end) pada dua endpoint analitis. Untuk mendukung tujuan tersebut, rancangan lingkungan pengujian dibangun di atas dua komponen utama: lingkungan terkontainerisasi berbasis Docker dan sistem instrumentasi pengukuran dua arah (dual-layer instrumentation). 
+
+Topologi lingkungan pengujian dan interaksi alur instrumentasi disajikan pada Gambar 5. 
+
+ 
+| Aspek Teknis | Endpoint Rekomendasi (/suggestions) | Endpoint Modal Analitis (/modal-data) |
+|---|---|---|
+| Key Pattern | dss:suggestions:workspace_{workspace_id}:start_{start_date}:end_{end_date} | dss:modal-data:workspace_{workspace_id}:start_{start_date}:end_{end_date} |
+| Struktur Data Redis | JSON String | JSON String |
+| Penyimpanan | SETEX (TTL: 3.600 detik / 1 jam) | SETEX (TTL: 3.600 detik / 1 jam) |
+| Data yang Disimpan | Seluruh data kartu rekomendasi (skor performa, metrik utama, daftar saran DSS) | Seluruh data pop-up modal (metrik lengkap, tren, daftar urgent tasks, sebaran workload) |
+| Dampak Eliminasi Kueri | 0 kueri komputasi analitis DSS saat cache hit | 0 kueri komputasi analitis DSS saat cache hit (eliminasi partial cache hit) |
+ 
+
+Gambar 5. Topologi Lingkungan Pengujian Terkontainerisasi dan Alur Instrumentasi Pengukuran 
+
+Berdasarkan topologi pada Gambar 5, lingkungan pengujian diisolasi di dalam jaringan privat Docker (bridge network) bernama koladi_net. Isolasi ini mencakup tiga layanan utama: kontainer web dan aplikasi (koladi_app_local dan koladi_nginx_local) yang menjalankan PHP 8.2 dan Laravel 12, kontainer basis data (koladi_db_local) yang menjalankan PostgreSQL 15 untuk persistensi seeded dataset, serta kontainer cache (koladi_redis_local) yang menjalankan Redis 7.x untuk lapisan penyimpanan in-memory. 
+
+Sistem instrumentasi pengukuran dirancang secara khusus untuk mengekstraksi empat metrik kinerja secara objektif tanpa menimbulkan interferensi yang mendistorsi waktu eksekusi alami sistem: 
+
+Instrumentasi Sisi Klien (Client-Side Benchmark Runner): Diimplementasikan melalui skrip Node.js (scripts/benchmark-dss.js) yang bertindak sebagai pemanggil independen dari host OS. Skrip ini mengorkestrasi pengujian secara sekuensial terkontrol dengan menyertakan header X-Benchmark-Mode: 1. Waktu respons (response time) dihitung secara presisi sejak byte pertama permintaan dikirim hingga seluruh payload JSON diterima menggunakan fungsi process.hrtime.bigint() berpresisi nanodetik. Skrip ini juga mengontrol fase 3 kali warm-up (dibuang dari analisis) dan 10 kali repetisi valid, serta melakukan pembersihan kunci Redis per-workspace sebelum repetisi kondisi cache miss dijalankan. 
+
+Instrumentasi Sisi Server (Server-Side Middleware): Diimplementasikan melalui middleware Laravel (app/Http/Middleware/BenchmarkInstrumentation.php) yang aktif secara kondisional saat mendeteksi header pengujian. Middleware ini memanfaatkan fasilitas DB::listen untuk mencatat jumlah kueri SQL yang dieksekusi selama pemrosesan, fungsi memory_get_peak_usage(true) untuk merekam penggunaan RAM puncak mesin virtual PHP, serta membaca statistik keyspace hits/misses dari Redis untuk menentukan cache hit ratio. Nilai metrik internal ini kemudian disuntikkan ke dalam header respons HTTP (X-Debug-Query-Count, X-Debug-Memory-MB, X-Debug-Cache-Hit, dan X-Debug-Cache-Hit-Ratio) agar dapat terekam langsung oleh skrip klien ke dalam berkas CSV. 
+
+Agar seluruh rangkaian pengujian bersifat deterministik dan dapat direplikasi, spesifikasi perangkat keras dan perangkat lunak pengujian ditetapkan secara statis sebagaimana dirinci pada Tabel 6. 
+
+ | Aspek Teknis | Endpoint Rekomendasi (/suggestions) | Endpoint Modal Analitis (/modal-data) |
+|---|---|---|
+| Key Pattern | dss:suggestions:workspace_{workspace_id}:start_{start_date}:end_{end_date} | dss:modal-data:workspace_{workspace_id}:start_{start_date}:end_{end_date} |
+| Struktur Data Redis | JSON String | JSON String |
+| Penyimpanan | SETEX (TTL: 3.600 detik / 1 jam) | SETEX (TTL: 3.600 detik / 1 jam) |
+| Data yang Disimpan | Seluruh data kartu rekomendasi (skor performa, metrik utama, daftar saran DSS) | Seluruh data pop-up modal (metrik lengkap, tren, daftar urgent tasks, sebaran workload) |
+| Dampak Eliminasi Kueri | 0 kueri komputasi analitis DSS saat cache hit | 0 kueri komputasi analitis DSS saat cache hit (eliminasi partial cache hit) |
+
+Tabel 6. Spesifikasi Lingkungan Pengujian Perangkat Keras dan Perangkat Lunak 
+
+
+
+
+Selama seluruh rangkaian pengujian baseline dan optimized berlangsung, spesifikasi pada Tabel 6 dijaga konstan tanpa perubahan konfigurasi. Selain itu, pengujian dijalankan dengan jeda waktu istirahat antar-skenario guna memastikan kondisi sistem kembali stabil (idle state). Dengan protokol ini, variasi pada hasil pengukuran dapat dipastikan murni bersumber dari perbedaan perlakuan optimasi modul DSS, bukan akibat fluktuasi lingkungan komputasi. 
+
+ 

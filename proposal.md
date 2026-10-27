@@ -561,9 +561,9 @@ Berdasarkan topologi pada Gambar 5, lingkungan pengujian diisolasi di dalam jari
 
 Sistem instrumentasi pengukuran dirancang secara khusus untuk mengekstraksi empat metrik kinerja secara objektif tanpa menimbulkan interferensi yang mendistorsi waktu eksekusi alami sistem: 
 
-Instrumentasi Sisi Klien (Client-Side Benchmark Runner): Diimplementasikan melalui skrip Node.js (scripts/benchmark-dss.js) yang bertindak sebagai pemanggil independen dari host OS. Skrip ini mengorkestrasi pengujian secara sekuensial terkontrol dengan menyertakan header X-Benchmark-Mode: 1. Waktu respons (response time) dihitung secara presisi sejak byte pertama permintaan dikirim hingga seluruh payload JSON diterima menggunakan fungsi process.hrtime.bigint() berpresisi nanodetik. Skrip ini juga mengontrol fase 3 kali warm-up (dibuang dari analisis) dan 10 kali repetisi valid, serta melakukan pembersihan kunci Redis per-workspace sebelum repetisi kondisi cache miss dijalankan. 
+1. Instrumentasi Sisi Klien (Client-Side Benchmark Runner): Diimplementasikan melalui skrip Node.js (scripts/benchmark-dss.js) yang bertindak sebagai pemanggil independen dari host OS. Skrip ini mengorkestrasi pengujian secara sekuensial terkontrol dengan menyertakan header X-Benchmark-Mode: 1. Waktu respons (response time) dihitung secara presisi sejak byte pertama permintaan dikirim hingga seluruh payload JSON diterima menggunakan fungsi process.hrtime.bigint() berpresisi nanodetik. Skrip ini juga mengontrol fase 3 kali warm-up (dibuang dari analisis) dan 10 kali repetisi valid, serta melakukan pembersihan kunci Redis per-workspace sebelum repetisi kondisi cache miss dijalankan. 
 
-Instrumentasi Sisi Server (Server-Side Middleware): Diimplementasikan melalui middleware Laravel (app/Http/Middleware/BenchmarkInstrumentation.php) yang aktif secara kondisional saat mendeteksi header pengujian. Middleware ini memanfaatkan fasilitas DB::listen untuk mencatat jumlah kueri SQL yang dieksekusi selama pemrosesan, fungsi memory_get_peak_usage(true) untuk merekam penggunaan RAM puncak mesin virtual PHP, serta membaca statistik keyspace hits/misses dari Redis untuk menentukan cache hit ratio. Nilai metrik internal ini kemudian disuntikkan ke dalam header respons HTTP (X-Debug-Query-Count, X-Debug-Memory-MB, X-Debug-Cache-Hit, dan X-Debug-Cache-Hit-Ratio) agar dapat terekam langsung oleh skrip klien ke dalam berkas CSV. 
+2. Instrumentasi Sisi Server (Server-Side Middleware): Diimplementasikan melalui middleware Laravel (app/Http/Middleware/BenchmarkInstrumentation.php) yang aktif secara kondisional saat mendeteksi header pengujian. Middleware ini memanfaatkan fasilitas DB::listen untuk mencatat jumlah kueri SQL yang dieksekusi selama pemrosesan, fungsi memory_get_peak_usage(true) untuk merekam penggunaan RAM puncak mesin virtual PHP, serta membaca statistik keyspace hits/misses dari Redis untuk menentukan cache hit ratio. Nilai metrik internal ini kemudian disuntikkan ke dalam header respons HTTP (X-Debug-Query-Count, X-Debug-Memory-MB, X-Debug-Cache-Hit, dan X-Debug-Cache-Hit-Ratio) agar dapat terekam langsung oleh skrip klien ke dalam berkas CSV. 
 
 Agar seluruh rangkaian pengujian bersifat deterministik dan dapat direplikasi, spesifikasi perangkat keras dan perangkat lunak pengujian ditetapkan secara statis sebagaimana dirinci pada Tabel 6. 
 
@@ -582,4 +582,34 @@ Tabel 6. Spesifikasi Lingkungan Pengujian Perangkat Keras dan Perangkat Lunak
 
 Selama seluruh rangkaian pengujian baseline dan optimized berlangsung, spesifikasi pada Tabel 6 dijaga konstan tanpa perubahan konfigurasi. Selain itu, pengujian dijalankan dengan jeda waktu istirahat antar-skenario guna memastikan kondisi sistem kembali stabil (idle state). Dengan protokol ini, variasi pada hasil pengukuran dapat dipastikan murni bersumber dari perbedaan perlakuan optimasi modul DSS, bukan akibat fluktuasi lingkungan komputasi. 
 
- 
+3.5. Rencana Analisis  
+
+Rencana analisis ini mengolah hasil pengujian baseline dan optimized yang diperoleh pada tahap Penilaian Efek Kualitas (Subbab 3.2.5), menggunakan variabel penelitian, parameter, instrumen pengukuran, formula, dan kriteria evaluasi yang telah dijelaskan pada Subbab 2.2 dan Subbab 2.4. 
+
+3.5.1. Analisis Baseline 
+
+Dua endpoint DSS (/suggestions dan /modal-data) dijalankan pada tiga skenario volume data sintetis (Small, Medium, Large) sebelum optimasi diterapkan, mencakup kondisi Cache Miss dan Cache Hit. Sebagaimana dirumuskan pada Subbab 2.4.3, setiap kombinasi perlakuan diawali dengan tiga kali warm-up requests (dibuang dari analisis) dan sepuluh kali repetisi pengukuran valid pada kondisi stabil (steady-state), menghasilkan total 120 data observasi baseline. Hasil yang dicatat meliputi nilai Response Time, SQL Query Count, Memory Utilization, dan Cache Hit Ratio yang diolah menggunakan statistik deskriptif (Mean, Standard Deviation, Min, Max) sesuai Subbab 2.4.4, sebagai kondisi awal pembanding terhadap kondisi optimized. 
+
+3.5.2. Analisis Optimized 
+
+Setelah strategi Redis Cache-Aside dan optimasi kueri Eloquent ORM diterapkan pada modul DSS Koladi, kedua endpoint diuji kembali menggunakan dataset sintetis, skenario volume data, kondisi cache, dan parameter request yang sama persis dengan kondisi baseline untuk menjaga keterbandingan hasil. Sebagaimana pada kondisi baseline, setiap query dan endpoint dijalankan dengan tiga kali warm-up dan sepuluh kali pengukuran valid mengikuti Subbab 2.4.3, menghasilkan 120 data observasi optimized. Parameter yang dicatat identik dengan kondisi baseline dan diolah menggunakan statistik deskriptif untuk mengamati stabilitas serta konsistensi performa sistem setelah refaktorisasi diterapkan. 
+
+3.5.3. Analisis Efisiensi Kueri SQL dan Utilisasi Memori 
+
+Efisiensi penarikan data Eloquent ORM dianalisis dengan membandingkan jumlah kueri SQL (SQL Query Count) dan penggunaan memori (Memory Utilization) antara kondisi baseline dan optimized, terutama pada kondisi Cache Miss saat modul DSS memproses data secara penuh. 
+
+Pengurangan jumlah kueri SQL dianalisis untuk melihat keberhasilan eliminasi masalah N+1 pada relasi checklists dan kueri berulang di dalam perulangan anggota tim (Subbab 2.2.3). Sementara itu, penggunaan memori dianalisis menggunakan persentase perbaikan (Improvement %) sesuai Subbab 2.4.4, untuk melihat seberapa besar penghematan RAM server setelah pengambilan kolom dibatasi hanya pada data yang diperlukan. 
+
+3.5.4. Analisis Response Time dan Skalabilitas Kinerja 
+
+Response Time dianalisis dengan membandingkan durasi latensi end-to-end HTTP antara kondisi baseline dan optimized menggunakan formula Improvement (%) sesuai Subbab 2.4.4. Analisis dipisahkan antara kondisi Cache Miss (untuk mengevaluasi efisiensi pipeline komputasi ORM teroptimasi) dan kondisi Cache Hit (untuk memvalidasi percepatan retrieval data dari memori RAM Redis dibandingkan pembacaan diska PostgreSQL sesuai keunggulan latensi memori pada Subbab 2.2.2). Selain itu, tren Response Time dianalisis di bawah pertumbuhan volume dataset dari Small (50 tugas/5 anggota), Medium (200 tugas/15 anggota), hingga Large (500 tugas/30 anggota) untuk menguji skalabilitas sistem dan membuktikan apakah optimasi mampu menjaga responsivitas modul DSS berbasis web tetap stabil dari degradasi latensi saat data bertumbuh (Subbab 2.2.1). 
+
+3.5.5. Analisis Keterpaduan Cache Hit dan Akses Basis Data 
+
+Hasil Cache Hit Ratio dan SQL Query Count dianalisis secara bersamaan menggunakan pendekatan Joint Cache Analysis (Subbab 2.4.4). Pada konfigurasi optimized, Cache Hit Ratio mengukur keberhasilan pengambilan data langsung dari memori Redis. Analisis keterpaduan ini dilakukan untuk memastikan apakah kondisi Cache Hit benar-benar membebaskan basis data dari pemanggilan kueri SQL (mencapai 0 kueri komputasi). Selain itu, analisis ini membuktikan terselesaikannya masalah partial cache hit pada endpoint /modal-data, di mana seluruh data analitis (termasuk tugas mendesak dan sebaran beban kerja) kini tersaji utuh dari memori Redis tanpa menyisakan kueri tambahan ke PostgreSQL (Subbab 2.2.4). 
+
+3.5.6. Interpretasi Hasil dan Uji Hipotesis 
+
+Hasil baseline dan optimized dibandingkan pada setiap skenario pengujian dengan mempertimbangkan Response Time, SQL Query Count, Memory Utilization, dan Cache Hit Ratio untuk menentukan efektivitas optimasi pada modul DSS Koladi. Uji Paired-Sample t-Test pada taraf signifikansi α = 0.05 digunakan untuk memastikan apakah perbedaan performa yang diperoleh terbukti signifikan secara statistik (Subbab 2.4.4). 
+
+Kesimpulan dari penelitian ini dibatasi pada lingkungan pengujian dan jalur eksekusi modul DSS Koladi (endpoint /suggestions dan /modal-data), sehingga tidak digeneralisasikan secara langsung ke seluruh fitur aplikasi Koladi maupun sistem SaaS lainnya (Subbab 2.2.4). 
